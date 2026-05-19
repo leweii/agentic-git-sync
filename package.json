@@ -1,0 +1,32 @@
+{
+  "name": "agentic-git-sync",
+  "version": "1.0.0",
+  "description": "Agentic two-way sync for Obsidian vault and submodules with GitHub",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "deploy": "npm run build && mkdir -p \"/Users/jakob/Desktop/Agentic Sync Testing/.obsidian/plugins/agentic-git-sync\" && cp main.js styles.css manifest.json \"/Users/jakob/Desktop/Agentic Sync Testing/.obsidian/plugins/agentic-git-sync/\""
+  },
+  "keywords": [],
+  "author": "Jakob",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^16.11.6",
+    "@typescript-eslint/eslint-plugin": "5.29.0",
+    "@typescript-eslint/parser": "5.29.0",
+    "esbuild": "0.17.3",
+    "eslint": "^9.39.4",
+    "eslint-plugin-obsidianmd": "^0.3.0",
+    "obsidian": "latest",
+    "tslib": "2.4.0",
+    "typescript": "4.7.4",
+    "typescript-eslint": "^8.59.4",
+    "vitest": "^4.1.6"
+  },
+  "dependencies": {
+    "simple-git": "^3.22.0"
+  }
+}

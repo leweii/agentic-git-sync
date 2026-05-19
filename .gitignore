@@ -1,0 +1,9 @@
+node_modules/
+main.js
+*.js.map
+
+# Local plugin data — contains user's GitHub PAT and personal settings
+data.json
+
+# macOS
+.DS_Store

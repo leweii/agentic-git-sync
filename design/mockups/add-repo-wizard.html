@@ -1,0 +1,1301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>GitHub Sync — Add Repo Wizard</title>
+<style>
+  /* Shared design tokens (same set as conflict-resolution.html / settings-ai-providers.html) */
+  :root {
+    --background-primary:        #1e1e1e;
+    --background-primary-alt:    #1a1a1a;
+    --background-secondary:      #262626;
+    --background-secondary-alt:  #2a2a2a;
+    --background-modifier-border:#393939;
+    --background-modifier-hover: #2f2f2f;
+    --background-modifier-active:#383838;
+
+    --text-normal:  #dcddde;
+    --text-muted:   #b3b3b3;
+    --text-faint:   #777;
+
+    --color-accent: #7c4dff;
+    --color-accent-hover: #8d65ff;
+    --color-accent-1: rgba(124, 77, 255, 0.15);
+    --color-red:    #fb464c;
+    --color-green:  #44cf6e;
+    --color-yellow: #e0ac00;
+    --color-orange: #e9973f;
+    --color-blue:   #027aff;
+
+    --ai-pick-marker: #a78bfa;
+
+    --font-ui:   -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  /* Gallery chrome */
+  html, body { margin: 0; padding: 0; background: #0d0d0d; color: var(--text-normal); font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
+  .gallery-header { max-width: 760px; margin: 48px auto 16px; padding: 0 24px; }
+  .gallery-header h1 { font-size: 22px; font-weight: 600; margin: 0 0 6px; }
+  .gallery-header p { font-size: 13px; color: var(--text-muted); margin: 0; line-height: 1.55; }
+  .gallery-header code { font-family: var(--font-mono); background: #161616; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+  .gallery-toc { max-width: 760px; margin: 24px auto 48px; padding: 16px 24px; background: #161616; border: 1px solid #222; border-radius: 10px; font-size: 13px; }
+  .gallery-toc ol { margin: 0; padding-left: 22px; line-height: 1.85; }
+  .gallery-toc a { color: var(--text-normal); text-decoration: none; }
+  .gallery-toc a:hover { color: var(--color-accent); }
+  .gallery-toc .toc-note { color: var(--text-faint); margin-left: 8px; }
+  .state-section { max-width: 760px; margin: 0 auto 64px; padding: 0 24px; }
+  .state-label { display: inline-block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--color-accent); background: var(--color-accent-1); padding: 4px 10px; border-radius: 4px; margin-bottom: 12px; }
+  .state-section h2 { font-size: 18px; font-weight: 600; margin: 0 0 6px; }
+  .state-section .state-desc { font-size: 13px; color: var(--text-muted); line-height: 1.6; margin: 0 0 20px; max-width: 700px; }
+  .state-section .state-desc strong { color: var(--text-normal); }
+  .state-section .state-desc code { font-family: var(--font-mono); background: #161616; padding: 1px 5px; border-radius: 3px; font-size: 11.5px; }
+
+  /* ───────────────────────────────────────────────────────────────
+     Wizard modal — actual plugin UI
+     ─────────────────────────────────────────────────────────────── */
+  .wizard {
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 10px;
+    overflow: hidden;
+    color: var(--text-normal);
+    font-size: 13px;
+    box-shadow: 0 20px 56px rgba(0,0,0,0.55);
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* Header with stepper */
+  .wizard-header {
+    padding: 20px 24px 0;
+    border-bottom: 1px solid var(--background-modifier-border);
+    background: var(--background-secondary);
+  }
+  .wizard-header-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .wizard-header-top h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    flex: 1;
+  }
+  .wizard-header-top .close {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 4px;
+    display: inline-flex;
+  }
+  .wizard-header-top .close:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+
+  .stepper {
+    display: flex;
+    align-items: center;
+    margin-bottom: 0;
+    padding-bottom: 16px;
+  }
+  .stepper .step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+  }
+  .stepper .step .dot {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--background-modifier-border);
+    color: var(--text-faint);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    flex-shrink: 0;
+    transition: all 0.2s;
+  }
+  .stepper .step.active .dot {
+    background: var(--color-accent);
+    color: white;
+    box-shadow: 0 0 0 4px var(--color-accent-1);
+  }
+  .stepper .step.done .dot {
+    background: var(--color-green);
+    color: white;
+  }
+  .stepper .step .label {
+    font-size: 11.5px;
+    color: var(--text-faint);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .stepper .step.active .label { color: var(--text-normal); font-weight: 600; }
+  .stepper .step.done .label { color: var(--text-muted); }
+  .stepper .step-line {
+    flex: 1;
+    height: 1.5px;
+    background: var(--background-modifier-border);
+    margin: 0 4px;
+    min-width: 16px;
+  }
+  .stepper .step-line.done { background: var(--color-green); }
+
+  /* Body */
+  .wizard-body {
+    padding: 28px 32px;
+    min-height: 320px;
+  }
+
+  .step-title {
+    font-size: 17px;
+    font-weight: 600;
+    margin: 0 0 6px;
+  }
+  .step-subtitle {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0 0 24px;
+    line-height: 1.55;
+  }
+
+  /* Form fields */
+  .field {
+    margin-bottom: 18px;
+  }
+  .field label {
+    display: block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+  .field .field-row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+  }
+  .field input[type="text"], .field input[type="password"], .field select {
+    flex: 1;
+    padding: 9px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-size: 13px;
+    font-family: var(--font-mono);
+    box-sizing: border-box;
+    width: 100%;
+  }
+  .field input:focus, .field select:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 2px var(--color-accent-1);
+  }
+  .field .hint {
+    font-size: 11.5px;
+    color: var(--text-faint);
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+  .field .hint a { color: var(--color-accent); text-decoration: none; }
+  .field .hint code { font-family: var(--font-mono); background: var(--background-secondary); padding: 1px 5px; border-radius: 3px; font-size: 11px; color: var(--text-muted); }
+
+  /* Inline validation badge */
+  .inline-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    margin-top: 8px;
+  }
+  .inline-badge.valid { background: rgba(68,207,110,0.12); color: var(--color-green); }
+  .inline-badge.invalid { background: rgba(251,70,76,0.12); color: var(--color-red); }
+  .inline-badge.loading { background: var(--background-modifier-hover); color: var(--text-muted); }
+  .inline-badge.warn { background: rgba(233,151,63,0.12); color: var(--color-orange); }
+
+  /* Mode cards (Source step) */
+  .mode-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 22px;
+  }
+  .mode-card {
+    background: var(--background-secondary);
+    border: 2px solid var(--background-modifier-border);
+    border-radius: 8px;
+    padding: 16px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .mode-card:hover { background: var(--background-modifier-hover); }
+  .mode-card.selected {
+    border-color: var(--color-accent);
+    background: var(--color-accent-1);
+  }
+  .mode-card .mode-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 7px;
+    background: var(--background-modifier-hover);
+    color: var(--ai-pick-marker);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 10px;
+  }
+  .mode-card.selected .mode-icon { background: var(--color-accent); color: white; }
+  .mode-card .mode-title {
+    font-size: 13.5px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: var(--text-normal);
+  }
+  .mode-card .mode-desc {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+
+  /* ── Collision card (Step 2 — Mount) ───────────────────────── */
+  .collision-card {
+    background: rgba(233,151,63,0.05);
+    border: 1px solid rgba(233,151,63,0.4);
+    border-radius: 8px;
+    padding: 16px;
+    margin-top: 4px;
+  }
+  .collision-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .collision-header .icon {
+    color: var(--color-orange);
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .collision-header h4 {
+    margin: 0 0 4px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text-normal);
+  }
+  .collision-header p {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin: 0;
+    line-height: 1.55;
+  }
+  .collision-header p code {
+    font-family: var(--font-mono);
+    background: var(--background-secondary);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11px;
+    color: var(--text-normal);
+  }
+
+  .collision-preview {
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-bottom: 14px;
+    font-size: 11.5px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    max-height: 90px;
+    overflow-y: auto;
+  }
+  .collision-preview .file-line {
+    padding: 1px 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .collision-preview .file-line .ext { color: var(--text-faint); }
+  .collision-preview .more { color: var(--text-faint); font-style: italic; padding-top: 4px; }
+
+  .collision-options {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .collision-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    background: var(--background-primary);
+    border: 1.5px solid var(--background-modifier-border);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .collision-option:hover { background: var(--background-secondary); }
+  .collision-option.selected {
+    border-color: var(--color-accent);
+    background: var(--color-accent-1);
+  }
+  .collision-option .radio {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid var(--background-modifier-border);
+    flex-shrink: 0;
+    margin-top: 2px;
+    position: relative;
+  }
+  .collision-option.selected .radio {
+    border-color: var(--color-accent);
+  }
+  .collision-option.selected .radio::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--color-accent);
+  }
+  .collision-option .content { flex: 1; }
+  .collision-option .opt-title {
+    font-weight: 600;
+    color: var(--text-normal);
+    margin-bottom: 3px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .collision-option .opt-tag {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+  }
+  .collision-option .opt-tag.safe { background: rgba(68,207,110,0.15); color: var(--color-green); }
+  .collision-option .opt-tag.warn { background: rgba(233,151,63,0.15); color: var(--color-orange); }
+  .collision-option .opt-tag.danger { background: rgba(251,70,76,0.15); color: var(--color-red); }
+  .collision-option .opt-desc {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    line-height: 1.55;
+  }
+  .collision-option .opt-desc code {
+    font-family: var(--font-mono);
+    background: var(--background-secondary);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11px;
+    color: var(--text-normal);
+  }
+  .collision-option.danger.selected {
+    border-color: var(--color-red);
+    background: rgba(251,70,76,0.08);
+  }
+  .collision-option.danger.selected .radio { border-color: var(--color-red); }
+  .collision-option.danger.selected .radio::after { background: var(--color-red); }
+
+  /* Type-to-confirm input for destructive option */
+  .type-to-confirm {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: rgba(251,70,76,0.05);
+    border-left: 3px solid var(--color-red);
+    border-radius: 4px;
+  }
+  .type-to-confirm label {
+    display: block;
+    font-size: 11px;
+    color: var(--color-red);
+    margin-bottom: 6px;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 500;
+  }
+  .type-to-confirm label code {
+    font-family: var(--font-mono);
+    background: rgba(251,70,76,0.12);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .type-to-confirm input {
+    width: 100%;
+    padding: 7px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    box-sizing: border-box;
+  }
+
+  /* Cloning progress */
+  .clone-progress {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 16px;
+    text-align: center;
+  }
+  .clone-spinner-wrap {
+    position: relative;
+    width: 72px;
+    height: 72px;
+    margin-bottom: 22px;
+  }
+  .clone-spinner {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    border: 3px solid var(--color-accent-1);
+    border-top-color: var(--color-accent);
+    animation: spin 1s linear infinite;
+  }
+  .clone-spinner-icon {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-accent);
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .clone-stage {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .clone-detail {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    margin-bottom: 18px;
+  }
+  .clone-bar {
+    width: 100%;
+    max-width: 360px;
+    height: 6px;
+    background: var(--background-modifier-border);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 10px;
+  }
+  .clone-bar .fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--color-accent), var(--ai-pick-marker));
+    transition: width 0.4s;
+  }
+  .clone-pct {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+  .clone-log {
+    width: 100%;
+    max-width: 420px;
+    margin-top: 20px;
+    padding: 10px 12px;
+    background: var(--background-primary-alt);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: left;
+    max-height: 80px;
+    overflow-y: auto;
+  }
+  .clone-log .line { padding: 1px 0; }
+  .clone-log .line .ts { color: var(--text-faint); }
+  .clone-log .line.success { color: var(--color-green); }
+
+  /* Done state */
+  .done-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 16px 16px;
+    text-align: center;
+  }
+  .done-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: rgba(68,207,110,0.15);
+    color: var(--color-green);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 18px;
+  }
+  .done-state h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 6px;
+  }
+  .done-state .subtitle {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0 0 24px;
+    max-width: 440px;
+    line-height: 1.55;
+  }
+  .done-summary {
+    width: 100%;
+    max-width: 480px;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+    text-align: left;
+  }
+  .done-summary .row {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    padding: 5px 0;
+    align-items: center;
+    gap: 12px;
+    font-size: 12.5px;
+  }
+  .done-summary .row .key { color: var(--text-faint); font-size: 11.5px; }
+  .done-summary .row .val { color: var(--text-normal); font-family: var(--font-mono); }
+  .done-summary .row .val.accent { color: var(--ai-pick-marker); }
+
+  /* Error state */
+  .error-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 16px;
+    text-align: center;
+  }
+  .error-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: rgba(251,70,76,0.12);
+    color: var(--color-red);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 18px;
+  }
+  .error-state h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0 0 6px;
+  }
+  .error-state .subtitle {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0 0 18px;
+    max-width: 460px;
+    line-height: 1.55;
+  }
+  .error-detail {
+    width: 100%;
+    max-width: 440px;
+    background: var(--background-primary-alt);
+    border: 1px solid var(--background-modifier-border);
+    border-left: 3px solid var(--color-red);
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: left;
+    margin-bottom: 20px;
+    line-height: 1.55;
+  }
+  .error-detail .label {
+    color: var(--color-red);
+    font-weight: 600;
+    margin-bottom: 4px;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  /* Preview rows (existing folder list) */
+  .preview-list {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    padding: 4px 0;
+    margin-top: 8px;
+    max-height: 140px;
+    overflow-y: auto;
+  }
+  .preview-list .row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+  }
+  .preview-list .row .ic { color: var(--text-faint); }
+  .preview-list .row .size { margin-left: auto; color: var(--text-faint); font-size: 11px; }
+
+  /* Footer */
+  .wizard-footer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 20px;
+    border-top: 1px solid var(--background-modifier-border);
+    background: var(--background-secondary);
+  }
+  .wizard-footer .spacer { flex: 1; }
+  .wizard-footer button {
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-size: 13px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .wizard-footer button:hover { background: var(--background-modifier-hover); }
+  .wizard-footer button.primary {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: white;
+  }
+  .wizard-footer button.primary:hover { background: var(--color-accent-hover); }
+  .wizard-footer button.danger-primary {
+    background: var(--color-red);
+    border-color: var(--color-red);
+    color: white;
+  }
+  .wizard-footer button.danger-primary:hover { filter: brightness(1.1); }
+  .wizard-footer button.ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-faint);
+  }
+  .wizard-footer button.ghost:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+  .wizard-footer button.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  /* Footer note */
+  .footer-note {
+    text-align: center;
+    color: var(--text-faint);
+    font-size: 12px;
+    margin: 64px 24px;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+
+<header class="gallery-header">
+  <h1>Add Repo Wizard — expanded flow</h1>
+  <p>
+    Page 3 of the design plan. Replaces the current single-screen <code>AddSubmoduleModal</code>
+    with a 4-step wizard that handles the unresolved design gap from the brainstorm:
+    <strong>what to do when the target folder already contains files</strong>. Three explicit
+    branches — adopt, reject, overwrite — with the destructive one gated by type-to-confirm.
+  </p>
+</header>
+
+<nav class="gallery-toc">
+  <ol>
+    <li><a href="#step-source">Step 1 — Source</a> <span class="toc-note">— vault/folder choice + URL probe + branch</span></li>
+    <li><a href="#step-mount-clean">Step 2a — Mount (clean)</a> <span class="toc-note">— happy path, target folder is empty/missing</span></li>
+    <li><a href="#step-mount-collision">Step 2b — Mount (COLLISION)</a> <span class="toc-note">— folder already has files, three-way branch decision</span></li>
+    <li><a href="#step-cloning">Step 3 — Cloning</a> <span class="toc-note">— progress bar with current stage + log tail</span></li>
+    <li><a href="#step-done">Step 4 — Done</a> <span class="toc-note">— success summary + next action</span></li>
+    <li><a href="#step-error">Error variant</a> <span class="toc-note">— network or auth failure with retry path</span></li>
+  </ol>
+</nav>
+
+<!-- ════════════════════════════════════════════════════════════
+     STEP 1 — SOURCE
+     ════════════════════════════════════════════════════════════ -->
+<section id="step-source" class="state-section">
+  <span class="state-label">Step 1</span>
+  <h2>Source — URL + branch + scope</h2>
+  <p class="state-desc">
+    User picks scope (entire vault vs. a folder), pastes a GitHub URL, and the wizard probes
+    GitHub for default branch + reachability inline. <strong>The "Folder" card auto-fills the path
+    field from the repo name</strong> — fewer keystrokes than the current AddSubmoduleModal.
+  </p>
+
+  <div class="wizard">
+    <div class="wizard-header">
+      <div class="wizard-header-top">
+        <h3>Add a repository</h3>
+        <button class="close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+      </div>
+      <div class="stepper">
+        <div class="step active">
+          <span class="dot">1</span>
+          <span class="label">Source</span>
+        </div>
+        <div class="step-line"></div>
+        <div class="step">
+          <span class="dot">2</span>
+          <span class="label">Mount</span>
+        </div>
+        <div class="step-line"></div>
+        <div class="step">
+          <span class="dot">3</span>
+          <span class="label">Cloning</span>
+        </div>
+        <div class="step-line"></div>
+        <div class="step">
+          <span class="dot">4</span>
+          <span class="label">Done</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="wizard-body">
+      <h2 class="step-title">Where should this repo sync?</h2>
+      <p class="step-subtitle">Choose what part of your vault maps to this GitHub repository.</p>
+
+      <div class="mode-cards">
+        <div class="mode-card">
+          <div class="mode-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+          </div>
+          <div class="mode-title">Entire vault</div>
+          <div class="mode-desc">Push the whole vault to one repo. Best for personal backup.</div>
+        </div>
+        <div class="mode-card selected">
+          <div class="mode-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+          </div>
+          <div class="mode-title">A folder</div>
+          <div class="mode-desc">Map one folder to its own repo (submodule). Good for shared notes.</div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>GitHub URL</label>
+        <input type="text" value="https://github.com/leweii/work-notes.git" />
+        <div class="inline-badge valid">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          Found <strong style="margin:0 4px">leweii/work-notes</strong> · 14 MB · default branch <code style="font-family:var(--font-mono);background:rgba(124,77,255,0.15);padding:1px 5px;border-radius:3px;color:var(--ai-pick-marker)">main</code> · last push 2h ago
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Branch</label>
+        <div class="field-row">
+          <select>
+            <option>main (default)</option>
+            <option>develop</option>
+            <option>feature/sync-v2</option>
+          </select>
+        </div>
+        <div class="hint">Auto-detected from <code>origin</code>. You can switch branches later in repo settings.</div>
+      </div>
+    </div>
+
+    <div class="wizard-footer">
+      <button class="ghost">Cancel</button>
+      <div class="spacer"></div>
+      <button class="disabled">Back</button>
+      <button class="primary">
+        Next
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+      </button>
+    </div>
+  </div>
+</section>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     STEP 2A — MOUNT (CLEAN — no collision)
+     ════════════════════════════════════════════════════════════ -->
+<section id="step-mount-clean" class="state-section">
+  <span class="state-label">Step 2a</span>
+  <h2>Mount — clean path (happy path)</h2>
+  <p class="state-desc">
+    The path field uses the same live validation as the current modal — green badge when the
+    target folder doesn't exist or is empty. <strong>"Next" enables immediately</strong>; no extra
+    confirmation needed.
+  </p>
+
+  <div class="wizard">
+    <div class="wizard-header">
+      <div class="wizard-header-top">
+        <h3>Add a repository</h3>
+        <button class="close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+      </div>
+      <div class="stepper">
+        <div class="step done"><span class="dot"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span><span class="label">Source</span></div>
+        <div class="step-line done"></div>
+        <div class="step active"><span class="dot">2</span><span class="label">Mount</span></div>
+        <div class="step-line"></div>
+        <div class="step"><span class="dot">3</span><span class="label">Cloning</span></div>
+        <div class="step-line"></div>
+        <div class="step"><span class="dot">4</span><span class="label">Done</span></div>
+      </div>
+    </div>
+
+    <div class="wizard-body">
+      <h2 class="step-title">Where in your vault?</h2>
+      <p class="step-subtitle">This folder will be created and tracked as a git submodule.</p>
+
+      <div class="field">
+        <label>Folder path (relative to vault root)</label>
+        <input type="text" value="Projects/work-notes" />
+        <div class="inline-badge valid">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          Path is available — folder doesn't exist yet
+        </div>
+        <div class="hint">Path was auto-filled from the repo name. You can change it.</div>
+      </div>
+
+      <div style="background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 12px 14px; margin-top: 22px; font-size: 12px; color: var(--text-muted); display: flex; gap: 10px; align-items: flex-start;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--ai-pick-marker)" stroke-width="2" style="flex-shrink:0; margin-top:1px"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+        <span>
+          The repo's contents will populate this folder. Existing vault folders <strong style="color:var(--text-normal)">won't be touched</strong>.
+        </span>
+      </div>
+    </div>
+
+    <div class="wizard-footer">
+      <button class="ghost">Cancel</button>
+      <div class="spacer"></div>
+      <button>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+        Back
+      </button>
+      <button class="primary">
+        Clone repo
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+      </button>
+    </div>
+  </div>
+</section>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     STEP 2B — MOUNT (COLLISION — the unique branch)
+     ════════════════════════════════════════════════════════════ -->
+<section id="step-mount-collision" class="state-section">
+  <span class="state-label">Step 2b — KEY DECISION</span>
+  <h2>Mount — folder already has files</h2>
+  <p class="state-desc">
+    <strong>This is the design gap from the vault brainstorm:</strong> the target folder already
+    contains user files. Three explicit branches with safety-graded visual treatment:
+    <span style="color:var(--color-green)">Adopt</span> (safe, recommended) /
+    <span style="color:var(--color-orange)">Pick another path</span> (safe) /
+    <span style="color:var(--color-red)">Overwrite</span> (destructive — gated by type-to-confirm).
+    Existing file list is shown as a preview so the user knows what they're choosing about.
+  </p>
+
+  <div class="wizard">
+    <div class="wizard-header">
+      <div class="wizard-header-top">
+        <h3>Add a repository</h3>
+        <button class="close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+      </div>
+      <div class="stepper">
+        <div class="step done"><span class="dot"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span><span class="label">Source</span></div>
+        <div class="step-line done"></div>
+        <div class="step active"><span class="dot">2</span><span class="label">Mount</span></div>
+        <div class="step-line"></div>
+        <div class="step"><span class="dot">3</span><span class="label">Cloning</span></div>
+        <div class="step-line"></div>
+        <div class="step"><span class="dot">4</span><span class="label">Done</span></div>
+      </div>
+    </div>
+
+    <div class="wizard-body">
+      <h2 class="step-title">Where in your vault?</h2>
+      <p class="step-subtitle">This folder will be created and tracked as a git submodule.</p>
+
+      <div class="field">
+        <label>Folder path (relative to vault root)</label>
+        <input type="text" value="Projects/work-notes" />
+        <div class="inline-badge warn">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          Folder exists and has <strong style="margin:0 3px">12 files</strong> (1.2 MB)
+        </div>
+      </div>
+
+      <div class="collision-card">
+        <div class="collision-header">
+          <div class="icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          </div>
+          <div>
+            <h4>Existing content at <code>Projects/work-notes</code></h4>
+            <p>The repo can't be cloned on top of existing files. Choose how to proceed:</p>
+          </div>
+        </div>
+
+        <div class="collision-preview">
+          <div class="file-line"><span class="ic">📝</span>meeting-notes-2026-04-29.md<span class="size">4.2 KB</span></div>
+          <div class="file-line"><span class="ic">📝</span>q2-roadmap.md<span class="size">8.1 KB</span></div>
+          <div class="file-line"><span class="ic">📝</span>standup.md<span class="size">2.3 KB</span></div>
+          <div class="file-line"><span class="ic">📁</span>archive/<span class="size">8 files</span></div>
+          <div class="file-line"><span class="ic">📁</span>drafts/<span class="size">3 files</span></div>
+          <div class="more">+ 7 more files…</div>
+        </div>
+
+        <div class="collision-options">
+          <div class="collision-option selected">
+            <div class="radio"></div>
+            <div class="content">
+              <div class="opt-title">
+                Adopt — merge existing files into the repo
+                <span class="opt-tag safe">Recommended · Safe</span>
+              </div>
+              <div class="opt-desc">
+                Initialize git inside <code>Projects/work-notes</code>, then push your existing 12 files to <code>origin/main</code> as the first commit. Nothing is deleted; nothing is downloaded. Best when this folder already <em>is</em> the project you want to start tracking.
+              </div>
+            </div>
+          </div>
+
+          <div class="collision-option">
+            <div class="radio"></div>
+            <div class="content">
+              <div class="opt-title">
+                Pick another path
+                <span class="opt-tag safe">Safe</span>
+              </div>
+              <div class="opt-desc">
+                Go back and choose an empty folder name (e.g. <code>Projects/work-notes-clone</code>). Existing files stay where they are.
+              </div>
+            </div>
+          </div>
+
+          <div class="collision-option danger">
+            <div class="radio"></div>
+            <div class="content">
+              <div class="opt-title">
+                Overwrite — replace with the remote repo
+                <span class="opt-tag danger">Destructive</span>
+              </div>
+              <div class="opt-desc">
+                Move existing files to <code>.trash/work-notes-1747142400/</code>, then clone the repo fresh. Recoverable for 30 days from your vault's trash.
+              </div>
+              <!-- Type-to-confirm appears when this option is selected.
+                   Shown here as inactive (option not selected) -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wizard-footer">
+      <button class="ghost">Cancel</button>
+      <div class="spacer"></div>
+      <button>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+        Back
+      </button>
+      <button class="primary">
+        Adopt &amp; push existing files
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Inline variant: Overwrite selected — show type-to-confirm + danger CTA -->
+  <p class="state-desc" style="margin-top:32px">
+    <strong>Variant when "Overwrite" is selected</strong> — the option expands inline with a
+    type-to-confirm input, and the footer CTA turns red. User must type the exact folder name
+    to enable the destructive button.
+  </p>
+
+  <div class="wizard" style="margin-top:8px">
+    <div class="wizard-header" style="border-bottom:none">
+      <div class="wizard-header-top">
+        <h3>Add a repository</h3>
+      </div>
+      <div class="stepper" style="opacity:0.4">
+        <div class="step done"><span class="dot">✓</span><span class="label">Source</span></div>
+        <div class="step-line done"></div>
+        <div class="step active"><span class="dot">2</span><span class="label">Mount</span></div>
+        <div class="step-line"></div>
+        <div class="step"><span class="dot">3</span><span class="label">Cloning</span></div>
+        <div class="step-line"></div>
+        <div class="step"><span class="dot">4</span><span class="label">Done</span></div>
+      </div>
+    </div>
+    <div class="wizard-body" style="padding-top:0">
+      <div class="collision-card" style="margin-top:8px">
+        <div class="collision-options">
+          <div class="collision-option danger selected">
+            <div class="radio"></div>
+            <div class="content">
+              <div class="opt-title">
+                Overwrite — replace with the remote repo
+                <span class="opt-tag danger">Destructive</span>
+              </div>
+              <div class="opt-desc">
+                Move existing files to <code>.trash/work-notes-1747142400/</code>, then clone the repo fresh. Recoverable for 30 days from your vault's trash.
+              </div>
+              <div class="type-to-confirm">
+                <label>Type <code>work-notes</code> to confirm you want to move these 12 files to trash:</label>
+                <input type="text" placeholder="folder name…" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wizard-footer">
+      <button class="ghost">Cancel</button>
+      <div class="spacer"></div>
+      <button>Back</button>
+      <button class="danger-primary disabled">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path></svg>
+        Move to trash &amp; clone
+      </button>
+    </div>
+  </div>
+</section>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     STEP 3 — CLONING (progress)
+     ════════════════════════════════════════════════════════════ -->
+<section id="step-cloning" class="state-section">
+  <span class="state-label">Step 3</span>
+  <h2>Cloning — progress</h2>
+  <p class="state-desc">
+    Five sub-stages: <code>resolving HEAD</code> → <code>receiving objects</code> → <code>resolving deltas</code> → <code>checking out</code> → <code>configuring submodule</code>.
+    Each shows in <strong>clone-stage</strong> with a token-count detail underneath. Live log tail
+    (last 4 lines) gives engineers comfort that something is happening; non-technical users can
+    ignore it. <strong>Cancel works</strong> — it aborts the clone and goes back to Step 2.
+  </p>
+
+  <div class="wizard">
+    <div class="wizard-header">
+      <div class="wizard-header-top">
+        <h3>Add a repository</h3>
+        <button class="close" disabled style="opacity:0.4; cursor:not-allowed"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+      </div>
+      <div class="stepper">
+        <div class="step done"><span class="dot"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span><span class="label">Source</span></div>
+        <div class="step-line done"></div>
+        <div class="step done"><span class="dot"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span><span class="label">Mount</span></div>
+        <div class="step-line done"></div>
+        <div class="step active"><span class="dot">3</span><span class="label">Cloning</span></div>
+        <div class="step-line"></div>
+        <div class="step"><span class="dot">4</span><span class="label">Done</span></div>
+      </div>
+    </div>
+
+    <div class="wizard-body">
+      <div class="clone-progress">
+        <div class="clone-spinner-wrap">
+          <div class="clone-spinner"></div>
+          <div class="clone-spinner-icon">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          </div>
+        </div>
+
+        <div class="clone-stage">Receiving objects…</div>
+        <div class="clone-detail">238 / 412 objects · 8.4 MB / 14 MB</div>
+
+        <div class="clone-bar">
+          <div class="fill" style="width:58%"></div>
+        </div>
+        <div class="clone-pct">58% · ~12s remaining</div>
+
+        <div class="clone-log">
+          <div class="line"><span class="ts">[14:02:18]</span> Cloning into 'Projects/work-notes'…</div>
+          <div class="line success"><span class="ts">[14:02:19]</span> ✓ Resolved HEAD as 7e3a91c</div>
+          <div class="line"><span class="ts">[14:02:20]</span> remote: Enumerating objects: 412</div>
+          <div class="line"><span class="ts">[14:02:24]</span> Receiving objects: 58% (238/412)</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wizard-footer">
+      <button class="ghost">Cancel clone</button>
+      <div class="spacer"></div>
+      <button class="disabled">Back</button>
+      <button class="primary disabled">Done</button>
+    </div>
+  </div>
+</section>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     STEP 4 — DONE (success)
+     ════════════════════════════════════════════════════════════ -->
+<section id="step-done" class="state-section">
+  <span class="state-label">Step 4</span>
+  <h2>Done — success</h2>
+  <p class="state-desc">
+    Clean success state with a compact summary table (so user can verify the repo went where
+    they intended) and a primary CTA to <strong>Sync now</strong>. Secondary "Add another" lets users
+    chain multiple submodules without re-opening the dashboard.
+  </p>
+
+  <div class="wizard">
+    <div class="wizard-header">
+      <div class="wizard-header-top">
+        <h3>Add a repository</h3>
+        <button class="close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+      </div>
+      <div class="stepper">
+        <div class="step done"><span class="dot"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span><span class="label">Source</span></div>
+        <div class="step-line done"></div>
+        <div class="step done"><span class="dot"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span><span class="label">Mount</span></div>
+        <div class="step-line done"></div>
+        <div class="step done"><span class="dot"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span><span class="label">Cloning</span></div>
+        <div class="step-line done"></div>
+        <div class="step active"><span class="dot">✓</span><span class="label">Done</span></div>
+      </div>
+    </div>
+
+    <div class="wizard-body">
+      <div class="done-state">
+        <div class="done-icon">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        </div>
+        <h3>Repository added</h3>
+        <p class="subtitle">
+          <strong style="color:var(--text-normal)">work-notes</strong> is now mounted at <code style="font-family:var(--font-mono);background:var(--background-secondary);padding:1px 5px;border-radius:3px;font-size:11.5px">Projects/work-notes</code> and ready to sync.
+        </p>
+
+        <div class="done-summary">
+          <div class="row"><span class="key">Repository</span><span class="val">leweii/work-notes</span></div>
+          <div class="row"><span class="key">Branch</span><span class="val accent">main</span></div>
+          <div class="row"><span class="key">Mounted at</span><span class="val">Projects/work-notes</span></div>
+          <div class="row"><span class="key">Files</span><span class="val">412 files · 14 MB</span></div>
+          <div class="row"><span class="key">Auto-sync</span><span class="val">every 30 min</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wizard-footer">
+      <button class="ghost">Add another</button>
+      <div class="spacer"></div>
+      <button>Close</button>
+      <button class="primary">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+        Sync now
+      </button>
+    </div>
+  </div>
+</section>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     ERROR VARIANT
+     ════════════════════════════════════════════════════════════ -->
+<section id="step-error" class="state-section">
+  <span class="state-label">Error variant</span>
+  <h2>Cloning failed — network or auth error</h2>
+  <p class="state-desc">
+    If the clone fails partway, the wizard shows an error state instead of jumping back. User can
+    <strong>Retry</strong> (same params), <strong>Back</strong> (re-check URL/branch), or paste the raw error
+    when reporting. Stays in the wizard so the user doesn't lose Step 1 state.
+  </p>
+
+  <div class="wizard">
+    <div class="wizard-header">
+      <div class="wizard-header-top">
+        <h3>Add a repository</h3>
+        <button class="close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+      </div>
+      <div class="stepper">
+        <div class="step done"><span class="dot"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span><span class="label">Source</span></div>
+        <div class="step-line done"></div>
+        <div class="step done"><span class="dot"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span><span class="label">Mount</span></div>
+        <div class="step-line done"></div>
+        <div class="step active"><span class="dot" style="background:var(--color-red); color:white">!</span><span class="label" style="color:var(--color-red)">Cloning failed</span></div>
+        <div class="step-line"></div>
+        <div class="step"><span class="dot">4</span><span class="label">Done</span></div>
+      </div>
+    </div>
+
+    <div class="wizard-body">
+      <div class="error-state">
+        <div class="error-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+        </div>
+        <h3>Couldn't clone the repository</h3>
+        <p class="subtitle">
+          GitHub returned <strong style="color:var(--color-red)">403 Forbidden</strong> while authenticating. Your token might not have access to <code style="font-family:var(--font-mono);background:var(--background-secondary);padding:1px 5px;border-radius:3px;font-size:11.5px">leweii/work-notes</code>, or the repo is private and the <code style="font-family:var(--font-mono);background:var(--background-secondary);padding:1px 5px;border-radius:3px;font-size:11.5px">repo</code> scope is missing.
+        </p>
+
+        <div class="error-detail">
+          <div class="label">git stderr</div>
+          remote: Permission to leweii/work-notes.git denied to user.<br>
+          fatal: unable to access 'https://github.com/leweii/work-notes.git/':<br>
+          The requested URL returned error: 403<br>
+          <span style="color:var(--text-faint); font-size:10.5px;">— at 14:02:34, after 6.2s</span>
+        </div>
+
+        <div style="display:flex; gap:8px; margin-bottom:14px;">
+          <button style="background:var(--background-secondary); border:1px solid var(--background-modifier-border); color:var(--text-normal); padding:6px 12px; border-radius:5px; cursor:pointer; font-size:12px; display:inline-flex; align-items:center; gap:5px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            Copy error
+          </button>
+          <button style="background:var(--background-secondary); border:1px solid var(--background-modifier-border); color:var(--text-normal); padding:6px 12px; border-radius:5px; cursor:pointer; font-size:12px; display:inline-flex; align-items:center; gap:5px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            How to fix token scope
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="wizard-footer">
+      <button class="ghost">Cancel</button>
+      <div class="spacer"></div>
+      <button>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+        Back to Source
+      </button>
+      <button class="primary">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+        Retry clone
+      </button>
+    </div>
+  </div>
+</section>
+
+
+<p class="footer-note">
+  Preview locally: <code style="font-family:var(--font-mono); background:#161616; padding:2px 6px; border-radius:3px">open design/mockups/add-repo-wizard.html</code><br />
+  All three mockups (conflict resolution · settings AI · add-repo wizard) share one CSS-variable design system — they'll port together into <code style="font-family:var(--font-mono); background:#161616; padding:2px 6px; border-radius:3px">styles.css</code>.
+</p>
+
+</body>
+</html>

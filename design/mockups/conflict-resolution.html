@@ -1,0 +1,1752 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>GitHub Sync — Conflict Resolution Mockups</title>
+<style>
+  /* ───────────────────────────────────────────────────────────────
+     Obsidian dark theme tokens (hex values so the file renders
+     standalone in any browser, but variable names match Obsidian
+     so the design translates 1:1 into the plugin's styles.css).
+     ─────────────────────────────────────────────────────────────── */
+  :root {
+    --background-primary:        #1e1e1e;
+    --background-primary-alt:    #1a1a1a;
+    --background-secondary:      #262626;
+    --background-secondary-alt:  #2a2a2a;
+    --background-modifier-border:#393939;
+    --background-modifier-hover: #2f2f2f;
+    --background-modifier-active:#383838;
+    --background-modifier-success:rgba(68, 207, 110, 0.15);
+    --background-modifier-error: rgba(251, 70, 76, 0.15);
+
+    --text-normal:  #dcddde;
+    --text-muted:   #b3b3b3;
+    --text-faint:   #777;
+    --text-on-accent:#ffffff;
+
+    --color-accent: #7c4dff;
+    --color-accent-hover: #8d65ff;
+    --color-accent-1: rgba(124, 77, 255, 0.15);
+    --color-red:    #fb464c;
+    --color-green:  #44cf6e;
+    --color-yellow: #e0ac00;
+    --color-orange: #e9973f;
+    --color-blue:   #027aff;
+
+    /* diff-specific */
+    --diff-add-bg:    rgba(68, 207, 110, 0.10);
+    --diff-add-marker:#44cf6e;
+    --diff-del-bg:    rgba(251, 70, 76, 0.10);
+    --diff-del-marker:#fb464c;
+    --diff-gutter-bg: #1a1a1a;
+    --diff-gutter-fg: #555;
+
+    /* AI suggestion column */
+    --ai-pane-bg:     rgba(124, 77, 255, 0.05);
+    --ai-pane-border: rgba(124, 77, 255, 0.35);
+    --ai-pick-bg:     rgba(124, 77, 255, 0.18);
+    --ai-pick-marker: #a78bfa;
+
+    --pane-dim-opacity: 0.55;
+
+    --font-ui:   -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  /* ───────────────────────────────────────────────────────────────
+     Gallery chrome (not part of the plugin — just hosts the mockups)
+     ─────────────────────────────────────────────────────────────── */
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #0d0d0d;
+    color: var(--text-normal);
+    font-family: var(--font-ui);
+    -webkit-font-smoothing: antialiased;
+  }
+  .gallery-header {
+    max-width: 1280px;
+    margin: 48px auto 16px;
+    padding: 0 24px;
+  }
+  .gallery-header h1 {
+    font-size: 22px;
+    font-weight: 600;
+    margin: 0 0 6px;
+  }
+  .gallery-header p {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0;
+    line-height: 1.55;
+  }
+  .gallery-toc {
+    max-width: 1280px;
+    margin: 24px auto 56px;
+    padding: 16px 24px;
+    background: #161616;
+    border: 1px solid #222;
+    border-radius: 10px;
+    font-size: 13px;
+  }
+  .gallery-toc ol { margin: 0; padding-left: 22px; line-height: 1.85; }
+  .gallery-toc a { color: var(--text-normal); text-decoration: none; }
+  .gallery-toc a:hover { color: var(--color-accent); }
+  .gallery-toc .toc-note { color: var(--text-faint); margin-left: 8px; }
+
+  .state-section {
+    max-width: 1280px;
+    margin: 0 auto 96px;
+    padding: 0 24px;
+  }
+  .state-label {
+    display: inline-block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--color-accent);
+    background: var(--color-accent-1);
+    padding: 4px 10px;
+    border-radius: 4px;
+    margin-bottom: 12px;
+  }
+  .state-section h2 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 6px;
+  }
+  .state-section .state-desc {
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.6;
+    margin: 0 0 20px;
+    max-width: 800px;
+  }
+  .state-section .state-desc strong { color: var(--text-normal); }
+
+  /* ───────────────────────────────────────────────────────────────
+     Modal frame — this is the actual plugin UI mockup
+     ─────────────────────────────────────────────────────────────── */
+  .modal {
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 10px;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.55);
+    overflow: hidden;
+    font-size: 13px;
+    color: var(--text-normal);
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    height: 720px;
+  }
+
+  /* ── Header ─────────────────────────────────────────────────── */
+  .modal-header {
+    padding: 14px 18px 12px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    background: var(--background-secondary);
+  }
+  .modal-header-top {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 4px;
+  }
+  .back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 4px 8px;
+    margin-left: -8px;
+    border-radius: 4px;
+  }
+  .back-btn:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+  .modal-title {
+    font-size: 14px;
+    font-weight: 600;
+    flex: 1;
+  }
+  .modal-title .filename {
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    font-weight: 400;
+    margin-left: 6px;
+  }
+  .header-icons {
+    display: flex;
+    gap: 4px;
+  }
+  .header-icons button {
+    background: transparent;
+    border: none;
+    padding: 6px;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .header-icons button:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+  .modal-header-meta {
+    font-size: 11.5px;
+    color: var(--text-faint);
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .modal-header-meta .dot { color: #555; }
+  .modal-header-meta code {
+    font-family: var(--font-mono);
+    background: var(--background-primary);
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: var(--text-muted);
+  }
+
+  /* ── Body ───────────────────────────────────────────────────── */
+  .modal-body {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    min-height: 0;
+  }
+
+  /* Files sidebar */
+  .files-pane {
+    border-right: 1px solid var(--background-modifier-border);
+    background: var(--background-primary-alt);
+    padding: 12px 8px;
+    overflow-y: auto;
+    font-size: 12.5px;
+  }
+  .files-pane h4 {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+    margin: 6px 8px 8px;
+    font-weight: 600;
+  }
+  .file-group {
+    margin-bottom: 4px;
+  }
+  .file-group-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .file-group-header:hover { background: var(--background-modifier-hover); }
+  .file-group-header svg { width: 12px; height: 12px; }
+  .file-group-header .chevron { color: var(--text-faint); }
+  .file-list {
+    list-style: none;
+    margin: 0 0 4px 0;
+    padding: 0 0 0 22px;
+  }
+  .file-list li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    color: var(--text-muted);
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+  .file-list li:hover { background: var(--background-modifier-hover); }
+  .file-list li.current {
+    background: var(--color-accent-1);
+    color: var(--text-normal);
+  }
+  .file-list li.current::before {
+    content: "";
+    position: absolute;
+  }
+  .file-badge {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .file-badge.unresolved { background: rgba(251,70,76,0.18); color: var(--color-red); }
+  .file-badge.current    { background: var(--color-accent); color: white; }
+  .file-badge.resolved   { background: rgba(68,207,110,0.18); color: var(--color-green); }
+
+  .legend {
+    border-top: 1px solid var(--background-modifier-border);
+    margin-top: 12px;
+    padding: 12px 8px 4px;
+    font-size: 11px;
+    color: var(--text-faint);
+  }
+  .legend-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+  }
+  .legend .file-badge { width: 10px; height: 10px; font-size: 8px; }
+
+  /* Right side — main pane */
+  .main-pane {
+    display: grid;
+    grid-template-rows: auto 1fr auto auto;
+    min-height: 0;
+    min-width: 0;
+  }
+
+  .hunk-nav {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: var(--background-primary);
+  }
+  .hunk-nav .hunk-label {
+    font-weight: 600;
+    font-size: 13px;
+  }
+  .hunk-nav .nav-btns {
+    display: flex;
+    gap: 4px;
+  }
+  .hunk-nav .nav-btns button {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    color: var(--text-muted);
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .hunk-nav .nav-btns button:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+  .hunk-nav .nav-btns button.disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .confidence {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .confidence .dots {
+    display: inline-flex;
+    gap: 3px;
+  }
+  .confidence .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--background-modifier-border);
+  }
+  .confidence .dot.on { background: var(--color-accent); }
+  .confidence .label {
+    font-weight: 500;
+    color: var(--text-normal);
+  }
+  .confidence.low .label { color: var(--color-orange); }
+  .confidence.low .dot.on { background: var(--color-orange); }
+
+  /* Three-pane diff */
+  .diff-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1.05fr;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--background-primary);
+  }
+  .diff-pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border-right: 1px solid var(--background-modifier-border);
+    overflow: hidden;
+  }
+  .diff-pane:last-child { border-right: none; }
+
+  .diff-pane-header {
+    padding: 8px 12px;
+    background: var(--background-secondary);
+    border-bottom: 1px solid var(--background-modifier-border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+  .diff-pane-header .branch-tag {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--background-primary);
+    color: var(--text-muted);
+  }
+  .diff-pane-header .meta {
+    margin-left: auto;
+    color: var(--text-faint);
+    font-size: 11px;
+  }
+  .diff-pane.ai .diff-pane-header {
+    background: var(--ai-pick-bg);
+    color: var(--text-normal);
+    border-bottom-color: var(--ai-pane-border);
+  }
+  .diff-pane.ai .diff-pane-header .ai-icon { color: var(--ai-pick-marker); }
+
+  .diff-body {
+    flex: 1;
+    overflow: auto;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.55;
+    background: var(--background-primary);
+    min-height: 0;
+  }
+  .diff-pane.dim .diff-body,
+  .diff-pane.dim .diff-pane-header {
+    opacity: var(--pane-dim-opacity);
+  }
+  .diff-pane.ai .diff-body {
+    background: var(--ai-pane-bg);
+  }
+
+  .diff-line {
+    display: grid;
+    grid-template-columns: 36px 14px 1fr;
+    column-gap: 0;
+    align-items: center;
+    padding: 0 8px 0 0;
+    white-space: pre;
+  }
+  .diff-line .lineno {
+    text-align: right;
+    color: var(--diff-gutter-fg);
+    background: var(--diff-gutter-bg);
+    padding-right: 8px;
+    font-size: 10.5px;
+    user-select: none;
+  }
+  .diff-line .marker {
+    text-align: center;
+    color: var(--text-faint);
+    font-weight: 600;
+  }
+  .diff-line .code {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .diff-line.add { background: var(--diff-add-bg); }
+  .diff-line.add .marker { color: var(--diff-add-marker); }
+  .diff-line.del { background: var(--diff-del-bg); }
+  .diff-line.del .marker { color: var(--diff-del-marker); }
+
+  .diff-pane.ai .diff-line.ai-pick {
+    background: var(--ai-pick-bg);
+  }
+  .diff-pane.ai .diff-line.ai-pick .marker {
+    color: var(--ai-pick-marker);
+  }
+  .diff-line .star {
+    color: var(--ai-pick-marker);
+    margin-left: 6px;
+    font-size: 11px;
+  }
+
+  /* Hunk action buttons */
+  .hunk-actions {
+    display: flex;
+    gap: 8px;
+    padding: 10px 18px;
+    border-top: 1px solid var(--background-modifier-border);
+    border-bottom: 1px solid var(--background-modifier-border);
+    background: var(--background-secondary-alt);
+    flex-wrap: wrap;
+  }
+  .hunk-actions button {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    color: var(--text-normal);
+    padding: 6px 12px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12.5px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background .15s;
+  }
+  .hunk-actions button:hover {
+    background: var(--background-modifier-hover);
+  }
+  .hunk-actions button.primary {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: white;
+  }
+  .hunk-actions button.primary:hover { background: var(--color-accent-hover); }
+  .hunk-actions button.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+  .hunk-actions button .star { color: currentColor; }
+  .hunk-actions .spacer { flex: 1; }
+  .hunk-actions button.ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-muted);
+  }
+  .hunk-actions button.ghost:hover { background: var(--background-modifier-hover); }
+
+  /* AI reasoning card */
+  .ai-reasoning {
+    padding: 14px 18px;
+    background: var(--background-secondary);
+    border-top: 1px solid var(--background-modifier-border);
+    overflow-y: auto;
+    max-height: 180px;
+  }
+  .ai-reasoning-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ai-pick-marker);
+    font-weight: 600;
+    font-size: 12px;
+    margin-bottom: 8px;
+  }
+  .ai-reasoning ul {
+    margin: 0 0 8px;
+    padding-left: 20px;
+    color: var(--text-normal);
+    font-size: 12.5px;
+    line-height: 1.6;
+  }
+  .ai-reasoning .model-info {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    border-top: 1px dashed var(--background-modifier-border);
+    padding-top: 8px;
+    margin-top: 4px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .ai-reasoning .model-info .cost {
+    color: var(--color-green);
+  }
+
+  /* Footer bar */
+  .modal-footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 18px;
+    border-top: 1px solid var(--background-modifier-border);
+    background: var(--background-secondary);
+  }
+  .modal-footer .progress {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .modal-footer .progress strong { color: var(--text-normal); }
+  .modal-footer .spacer { flex: 1; }
+  .modal-footer button {
+    padding: 7px 14px;
+    border-radius: 5px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-size: 12.5px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .modal-footer button:hover { background: var(--background-modifier-hover); }
+  .modal-footer button.primary {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: white;
+  }
+  .modal-footer button.primary:hover { background: var(--color-accent-hover); }
+  .modal-footer button.bulk-ai {
+    background: transparent;
+    border-color: var(--ai-pane-border);
+    color: var(--ai-pick-marker);
+  }
+  .modal-footer button.bulk-ai:hover { background: var(--color-accent-1); }
+  .modal-footer button.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  /* ── Variant-specific overlays ─────────────────────────────── */
+
+  /* AI Thinking: skeleton + spinner */
+  .skeleton-line {
+    display: grid;
+    grid-template-columns: 36px 14px 1fr;
+    align-items: center;
+    padding: 2px 8px 2px 0;
+  }
+  .skeleton-line .lineno {
+    text-align: right;
+    color: var(--diff-gutter-fg);
+    background: var(--diff-gutter-bg);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    padding-right: 8px;
+  }
+  .skeleton-bar {
+    height: 10px;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #2a2540 0%, #3a3056 50%, #2a2540 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.6s linear infinite;
+    margin-left: 8px;
+  }
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  .thinking-overlay {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 28px 16px;
+    color: var(--ai-pick-marker);
+    font-size: 12px;
+    gap: 10px;
+  }
+  .spinner {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 2px solid rgba(124,77,255,0.25);
+    border-top-color: var(--color-accent);
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .thinking-text {
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  /* AI Failed: error card */
+  .error-card {
+    margin: 20px 16px;
+    padding: 18px;
+    background: rgba(251,70,76,0.05);
+    border: 1px solid rgba(251,70,76,0.35);
+    border-radius: 8px;
+  }
+  .error-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--color-red);
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .error-card-body {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    line-height: 1.55;
+    margin-bottom: 14px;
+  }
+  .error-card-body code {
+    font-family: var(--font-mono);
+    background: var(--background-primary);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11.5px;
+    color: var(--text-normal);
+  }
+  .error-card-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .error-card-actions button {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    padding: 6px 12px;
+    border-radius: 5px;
+    color: var(--text-normal);
+    cursor: pointer;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .error-card-actions button:hover { background: var(--background-modifier-hover); }
+
+  /* Manual edit: textarea */
+  .edit-textarea {
+    flex: 1;
+    margin: 8px;
+    padding: 10px 12px;
+    background: var(--background-primary);
+    border: 1px solid var(--color-accent);
+    box-shadow: 0 0 0 2px var(--color-accent-1);
+    border-radius: 6px;
+    color: var(--text-normal);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.6;
+    resize: none;
+    outline: none;
+    overflow: auto;
+    white-space: pre;
+  }
+  .edit-hint {
+    padding: 6px 12px;
+    font-size: 11.5px;
+    color: var(--text-faint);
+    background: var(--background-secondary-alt);
+    border-top: 1px solid var(--background-modifier-border);
+  }
+  .edit-hint kbd {
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-muted);
+  }
+
+  /* All Resolved: summary state */
+  .resolved-summary {
+    grid-column: 1 / -1;
+    background: var(--background-primary);
+    padding: 56px 32px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+  .resolved-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: rgba(68,207,110,0.15);
+    color: var(--color-green);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+  }
+  .resolved-summary h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 6px;
+  }
+  .resolved-summary .subtitle {
+    color: var(--text-muted);
+    font-size: 13px;
+    margin: 0 0 28px;
+    max-width: 480px;
+    line-height: 1.55;
+  }
+  .resolved-stats {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 28px;
+    background: var(--background-secondary);
+    padding: 16px 28px;
+    border-radius: 8px;
+    border: 1px solid var(--background-modifier-border);
+  }
+  .resolved-stats .stat .num {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text-normal);
+    display: block;
+    line-height: 1.2;
+  }
+  .resolved-stats .stat .num.ai { color: var(--ai-pick-marker); }
+  .resolved-stats .stat .num.green { color: var(--color-green); }
+  .resolved-stats .stat .lbl {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+  }
+  .resolved-commit {
+    width: 480px;
+    margin-top: 8px;
+  }
+  .resolved-commit label {
+    display: block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+    margin-bottom: 6px;
+    text-align: left;
+  }
+  .resolved-commit input {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 5px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    color: var(--text-normal);
+    font-size: 13px;
+    font-family: var(--font-mono);
+    box-sizing: border-box;
+  }
+  .resolved-commit input:focus {
+    border-color: var(--color-accent);
+    outline: none;
+    box-shadow: 0 0 0 2px var(--color-accent-1);
+  }
+
+  /* Low-confidence banner (variant of idle) */
+  .low-conf-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 18px;
+    background: rgba(233, 151, 63, 0.08);
+    border-bottom: 1px solid rgba(233, 151, 63, 0.35);
+    color: var(--color-orange);
+    font-size: 12px;
+  }
+  .low-conf-banner svg { flex-shrink: 0; }
+
+  /* Footer note */
+  .footer-note {
+    text-align: center;
+    color: var(--text-faint);
+    font-size: 12px;
+    margin: 64px 24px;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+
+<header class="gallery-header">
+  <h1>Conflict Resolution — 5 State Variants</h1>
+  <p>
+    High-fidelity HTML mockup of <code>ConflictModal</code> Page 6 from the design plan.
+    Colors use Obsidian's CSS variable names so styles port 1:1 into the plugin's <code>styles.css</code>.
+    Use this as the visual blueprint when redrawing in Figma — or as the direct reference when
+    rewriting <code>src/ui/ConflictModal.ts</code> to replace the current ours/theirs/skip buttons.
+  </p>
+</header>
+
+<nav class="gallery-toc">
+  <ol>
+    <li><a href="#state-idle">Idle</a> <span class="toc-note">— default three-pane diff with AI suggestion visible</span></li>
+    <li><a href="#state-thinking">AI-Thinking</a> <span class="toc-note">— AI pane shows skeleton + spinner, "Take AI" disabled</span></li>
+    <li><a href="#state-failed">AI-Failed</a> <span class="toc-note">— AI pane replaced with error card + retry / switch provider</span></li>
+    <li><a href="#state-edit">Manual Edit</a> <span class="toc-note">— AI pane becomes inline textarea editor</span></li>
+    <li><a href="#state-resolved">All Resolved</a> <span class="toc-note">— summary state, commit-ready</span></li>
+  </ol>
+</nav>
+
+<!-- ════════════════════════════════════════════════════════════
+     STATE 1 — IDLE (default)
+     ════════════════════════════════════════════════════════════ -->
+<section id="state-idle" class="state-section">
+  <span class="state-label">State 1</span>
+  <h2>Idle — default three-pane diff</h2>
+  <p class="state-desc">
+    Local and Remote panes are <strong>dimmed to 55% opacity</strong> as reference material;
+    the AI Suggestion pane is full-saturation with a soft accent tint. AI's picks are marked with
+    <strong>★</strong> on only the lines where AI actually chose — not on every line — so attention
+    compresses to 2-3 spots. Five hunk-level actions; file-level "Save & next" is independent
+    at the bottom right. Confidence indicator is the gating mechanism for the bottom-left
+    "Resolve all with AI" bulk action.
+  </p>
+
+  <div class="modal">
+    <!-- Header -->
+    <div class="modal-header">
+      <div class="modal-header-top">
+        <button class="back-btn" title="Back to dashboard">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+          Conflicts
+        </button>
+        <div class="modal-title">
+          notes / <span class="filename">Project Alpha.md</span>
+        </div>
+        <div class="header-icons">
+          <button title="About this file"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></button>
+          <button title="Settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></button>
+          <button title="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+        </div>
+      </div>
+      <div class="modal-header-meta">
+        Repo <code>my-knowledge</code>
+        <span class="dot">·</span>
+        branch <code>main</code> ← <code>origin/main</code>
+        <span class="dot">·</span>
+        last sync 2 min ago
+      </div>
+    </div>
+
+    <!-- Body -->
+    <div class="modal-body">
+      <!-- Files sidebar -->
+      <aside class="files-pane">
+        <h4>Files (5)</h4>
+
+        <div class="file-group">
+          <div class="file-group-header">
+            <svg class="chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+            docs
+          </div>
+          <ul class="file-list">
+            <li><span class="file-badge unresolved">✗</span><span>README.md</span></li>
+          </ul>
+        </div>
+
+        <div class="file-group">
+          <div class="file-group-header">
+            <svg class="chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+            notes
+          </div>
+          <ul class="file-list">
+            <li class="current"><span class="file-badge current">●</span><span>Project Alpha.md</span></li>
+            <li><span class="file-badge unresolved">✗</span><span>Notes2.md</span></li>
+          </ul>
+        </div>
+
+        <div class="file-group">
+          <div class="file-group-header">
+            <svg class="chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+            inbox
+          </div>
+          <ul class="file-list">
+            <li><span class="file-badge unresolved">✗</span><span>todo.md</span></li>
+            <li><span class="file-badge unresolved">✗</span><span>idea.md</span></li>
+          </ul>
+        </div>
+
+        <div class="legend">
+          <div class="legend-row"><span class="file-badge current">●</span> current</div>
+          <div class="legend-row"><span class="file-badge unresolved">✗</span> unresolved</div>
+          <div class="legend-row"><span class="file-badge resolved">✓</span> resolved</div>
+          <div class="legend-row"><span style="color:var(--ai-pick-marker)">★</span> AI decided</div>
+        </div>
+      </aside>
+
+      <!-- Main pane -->
+      <div class="main-pane">
+        <!-- Hunk nav -->
+        <div class="hunk-nav">
+          <span class="hunk-label">Hunk 1 of 3</span>
+          <div class="nav-btns">
+            <button class="disabled"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"></polyline></svg> Prev</button>
+            <button>Next <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+          </div>
+          <div class="confidence">
+            AI confidence:
+            <span class="dots">
+              <span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot"></span><span class="dot"></span>
+            </span>
+            <span class="label">medium</span>
+          </div>
+        </div>
+
+        <!-- Diff grid -->
+        <div class="diff-grid">
+          <!-- Local pane (dimmed) -->
+          <div class="diff-pane dim">
+            <div class="diff-pane-header">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M12 9V3M12 21v-6"></path></svg>
+              Local
+              <span class="branch-tag">you</span>
+              <span class="meta">14:02</span>
+            </div>
+            <div class="diff-body">
+              <div class="diff-line"><span class="lineno">12</span><span class="marker"> </span><span class="code">## Goals</span></div>
+              <div class="diff-line del"><span class="lineno">13</span><span class="marker">-</span><span class="code">- Ship by Q3</span></div>
+              <div class="diff-line del"><span class="lineno">14</span><span class="marker">-</span><span class="code">- Hire 2 engineers</span></div>
+              <div class="diff-line"><span class="lineno">15</span><span class="marker"> </span><span class="code"></span></div>
+              <div class="diff-line"><span class="lineno">16</span><span class="marker"> </span><span class="code">## Milestones</span></div>
+              <div class="diff-line del"><span class="lineno">17</span><span class="marker">-</span><span class="code">- Alpha demo Aug 30</span></div>
+              <div class="diff-line"><span class="lineno">18</span><span class="marker"> </span><span class="code"></span></div>
+            </div>
+          </div>
+
+          <!-- Remote pane (dimmed) -->
+          <div class="diff-pane dim">
+            <div class="diff-pane-header">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"></path><path d="M3 12h18"></path></svg>
+              Remote
+              <span class="branch-tag">origin</span>
+              <span class="meta">13:55</span>
+            </div>
+            <div class="diff-body">
+              <div class="diff-line"><span class="lineno">12</span><span class="marker"> </span><span class="code">## Goals</span></div>
+              <div class="diff-line add"><span class="lineno">13</span><span class="marker">+</span><span class="code">- Ship by Q2</span></div>
+              <div class="diff-line add"><span class="lineno">14</span><span class="marker">+</span><span class="code">- Hire 1 eng + 1 PM</span></div>
+              <div class="diff-line"><span class="lineno">15</span><span class="marker"> </span><span class="code"></span></div>
+              <div class="diff-line"><span class="lineno">16</span><span class="marker"> </span><span class="code">## Milestones</span></div>
+              <div class="diff-line add"><span class="lineno">17</span><span class="marker">+</span><span class="code">- Alpha demo Aug 15</span></div>
+              <div class="diff-line"><span class="lineno">18</span><span class="marker"> </span><span class="code"></span></div>
+            </div>
+          </div>
+
+          <!-- AI Suggestion pane (full) -->
+          <div class="diff-pane ai">
+            <div class="diff-pane-header">
+              <svg class="ai-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15 9 22 9 17 14 19 21 12 17 5 21 7 14 2 9 9 9 12 2"></polygon></svg>
+              AI Suggestion
+              <span class="branch-tag" style="background:rgba(124,77,255,0.18); color:var(--ai-pick-marker)">deepseek-chat</span>
+              <span class="meta">just now</span>
+            </div>
+            <div class="diff-body">
+              <div class="diff-line"><span class="lineno">12</span><span class="marker"> </span><span class="code">## Goals</span></div>
+              <div class="diff-line ai-pick"><span class="lineno">13</span><span class="marker">+</span><span class="code">- Ship by Q2 <span class="star">★</span></span></div>
+              <div class="diff-line ai-pick"><span class="lineno">14</span><span class="marker">+</span><span class="code">- Hire 1 eng + 1 PM + 1 eng <span class="star">★</span></span></div>
+              <div class="diff-line"><span class="lineno">15</span><span class="marker"> </span><span class="code"></span></div>
+              <div class="diff-line"><span class="lineno">16</span><span class="marker"> </span><span class="code">## Milestones</span></div>
+              <div class="diff-line ai-pick"><span class="lineno">17</span><span class="marker">+</span><span class="code">- Alpha demo Aug 15 <span class="star">★</span></span></div>
+              <div class="diff-line"><span class="lineno">18</span><span class="marker"> </span><span class="code"></span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hunk action buttons -->
+        <div class="hunk-actions">
+          <button>Take Local</button>
+          <button>Take Remote</button>
+          <button class="primary">
+            <svg class="star" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15 9 22 9 17 14 19 21 12 17 5 21 7 14 2 9 9 9 12 2"></polygon></svg>
+            Take AI
+          </button>
+          <button>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+            Edit manually
+          </button>
+          <button class="ghost">Skip hunk</button>
+        </div>
+
+        <!-- AI reasoning -->
+        <div class="ai-reasoning">
+          <div class="ai-reasoning-header">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15 9 22 9 17 14 19 21 12 17 5 21 7 14 2 9 9 9 12 2"></polygon></svg>
+            AI reasoning
+          </div>
+          <ul>
+            <li>Kept <strong>"Q2"</strong> from remote — newer commit, matches the roadmap doc you updated yesterday.</li>
+            <li>Merged hire plans <strong>additively</strong> — both sides added different roles, so kept all three.</li>
+            <li>Adopted <strong>Aug 15</strong> demo date from remote to stay consistent with the Q2 deadline.</li>
+          </ul>
+          <div class="model-info">
+            <span>Model: <strong style="color:var(--text-normal)">deepseek-chat</strong></span>
+            <span>1,240 in / 380 out tokens</span>
+            <span class="cost">~$0.0031</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="modal-footer">
+      <div class="progress"><strong>0/3</strong> hunks resolved in this file · <strong>4</strong> files remaining</div>
+      <div class="spacer"></div>
+      <button class="bulk-ai">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15 9 22 9 17 14 19 21 12 17 5 21 7 14 2 9 9 9 12 2"></polygon></svg>
+        Resolve all remaining with AI
+      </button>
+      <button>Cancel</button>
+      <button class="primary">
+        Save &amp; next file
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+      </button>
+    </div>
+  </div>
+</section>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     STATE 2 — AI THINKING
+     ════════════════════════════════════════════════════════════ -->
+<section id="state-thinking" class="state-section">
+  <span class="state-label">State 2</span>
+  <h2>AI-Thinking — generating merge</h2>
+  <p class="state-desc">
+    Triggered when the modal opens for a hunk that has no cached AI suggestion, or when the user
+    clicks "Regenerate". Local and Remote panes stay live and readable (user can still review and pick
+    Local/Remote without waiting). The AI pane shows shimmer skeletons over the line gutter plus
+    a centered spinner. <strong>"Take AI" is disabled with a spinner glyph</strong>; "Resolve all with AI"
+    is also disabled until the current hunk's suggestion lands. AI reasoning section is replaced
+    with a status line.
+  </p>
+
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-header-top">
+        <button class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+          Conflicts
+        </button>
+        <div class="modal-title">notes / <span class="filename">Project Alpha.md</span></div>
+        <div class="header-icons">
+          <button><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></button>
+          <button><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></button>
+          <button><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+        </div>
+      </div>
+      <div class="modal-header-meta">
+        Repo <code>my-knowledge</code> <span class="dot">·</span>
+        branch <code>main</code> ← <code>origin/main</code> <span class="dot">·</span>
+        last sync 2 min ago
+      </div>
+    </div>
+
+    <div class="modal-body">
+      <aside class="files-pane">
+        <h4>Files (5)</h4>
+        <div class="file-group">
+          <div class="file-group-header">
+            <svg class="chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+            notes
+          </div>
+          <ul class="file-list">
+            <li class="current"><span class="file-badge current">●</span><span>Project Alpha.md</span></li>
+            <li><span class="file-badge unresolved">✗</span><span>Notes2.md</span></li>
+          </ul>
+        </div>
+        <div class="legend">
+          <div class="legend-row"><span class="file-badge current">●</span> current</div>
+          <div class="legend-row"><span class="file-badge unresolved">✗</span> unresolved</div>
+          <div class="legend-row"><span class="file-badge resolved">✓</span> resolved</div>
+        </div>
+      </aside>
+
+      <div class="main-pane">
+        <div class="hunk-nav">
+          <span class="hunk-label">Hunk 1 of 3</span>
+          <div class="nav-btns">
+            <button class="disabled">Prev</button>
+            <button>Next</button>
+          </div>
+          <div class="confidence">
+            AI confidence:
+            <span class="dots">
+              <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            </span>
+            <span class="label" style="color:var(--text-faint)">computing…</span>
+          </div>
+        </div>
+
+        <div class="diff-grid">
+          <div class="diff-pane">
+            <div class="diff-pane-header">Local <span class="branch-tag">you</span><span class="meta">14:02</span></div>
+            <div class="diff-body">
+              <div class="diff-line"><span class="lineno">12</span><span class="marker"> </span><span class="code">## Goals</span></div>
+              <div class="diff-line del"><span class="lineno">13</span><span class="marker">-</span><span class="code">- Ship by Q3</span></div>
+              <div class="diff-line del"><span class="lineno">14</span><span class="marker">-</span><span class="code">- Hire 2 engineers</span></div>
+              <div class="diff-line"><span class="lineno">15</span><span class="marker"> </span><span class="code"></span></div>
+              <div class="diff-line"><span class="lineno">16</span><span class="marker"> </span><span class="code">## Milestones</span></div>
+              <div class="diff-line del"><span class="lineno">17</span><span class="marker">-</span><span class="code">- Alpha demo Aug 30</span></div>
+            </div>
+          </div>
+          <div class="diff-pane">
+            <div class="diff-pane-header">Remote <span class="branch-tag">origin</span><span class="meta">13:55</span></div>
+            <div class="diff-body">
+              <div class="diff-line"><span class="lineno">12</span><span class="marker"> </span><span class="code">## Goals</span></div>
+              <div class="diff-line add"><span class="lineno">13</span><span class="marker">+</span><span class="code">- Ship by Q2</span></div>
+              <div class="diff-line add"><span class="lineno">14</span><span class="marker">+</span><span class="code">- Hire 1 eng + 1 PM</span></div>
+              <div class="diff-line"><span class="lineno">15</span><span class="marker"> </span><span class="code"></span></div>
+              <div class="diff-line"><span class="lineno">16</span><span class="marker"> </span><span class="code">## Milestones</span></div>
+              <div class="diff-line add"><span class="lineno">17</span><span class="marker">+</span><span class="code">- Alpha demo Aug 15</span></div>
+            </div>
+          </div>
+          <div class="diff-pane ai">
+            <div class="diff-pane-header">
+              <svg class="ai-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15 9 22 9 17 14 19 21 12 17 5 21 7 14 2 9 9 9 12 2"></polygon></svg>
+              AI Suggestion
+              <span class="branch-tag" style="background:rgba(124,77,255,0.18); color:var(--ai-pick-marker)">deepseek-chat</span>
+              <span class="meta">…</span>
+            </div>
+            <div class="diff-body">
+              <div class="thinking-overlay">
+                <div class="spinner"></div>
+                <div>Generating merge…</div>
+                <div class="thinking-text">Reading 3 hunks · context 312 tokens</div>
+              </div>
+              <div class="skeleton-line"><span class="lineno">12</span><span></span><div class="skeleton-bar" style="width:42%"></div></div>
+              <div class="skeleton-line"><span class="lineno">13</span><span></span><div class="skeleton-bar" style="width:78%"></div></div>
+              <div class="skeleton-line"><span class="lineno">14</span><span></span><div class="skeleton-bar" style="width:64%"></div></div>
+              <div class="skeleton-line"><span class="lineno">15</span><span></span><div class="skeleton-bar" style="width:30%"></div></div>
+              <div class="skeleton-line"><span class="lineno">16</span><span></span><div class="skeleton-bar" style="width:55%"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hunk-actions">
+          <button>Take Local</button>
+          <button>Take Remote</button>
+          <button class="primary disabled">
+            <div class="spinner" style="width:11px;height:11px;border-width:1.5px"></div>
+            Take AI
+          </button>
+          <button>Edit manually</button>
+          <button class="ghost">Skip hunk</button>
+        </div>
+
+        <div class="ai-reasoning">
+          <div class="ai-reasoning-header">
+            <div class="spinner" style="width:13px;height:13px;border-width:1.5px"></div>
+            AI is thinking…
+          </div>
+          <ul>
+            <li style="color:var(--text-muted)">Streaming response from <strong style="color:var(--text-normal)">deepseek-chat</strong> — usually takes 2-4 seconds for a hunk this size.</li>
+          </ul>
+          <div class="model-info">
+            <span>Connection: <strong style="color:var(--color-green)">●</strong> stable</span>
+            <span>Cancel anytime — falls back to manual</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <div class="progress"><strong>0/3</strong> hunks resolved in this file · <strong>4</strong> files remaining</div>
+      <div class="spacer"></div>
+      <button class="bulk-ai disabled">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15 9 22 9 17 14 19 21 12 17 5 21 7 14 2 9 9 9 12 2"></polygon></svg>
+        Resolve all remaining with AI
+      </button>
+      <button>Cancel</button>
+      <button class="primary disabled">Save &amp; next file</button>
+    </div>
+  </div>
+</section>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     STATE 3 — AI FAILED
+     ════════════════════════════════════════════════════════════ -->
+<section id="state-failed" class="state-section">
+  <span class="state-label">State 3</span>
+  <h2>AI-Failed — provider error</h2>
+  <p class="state-desc">
+    The third pane is replaced by an error card with three explicit recoveries:
+    <strong>Retry</strong> (same provider), <strong>Switch provider</strong> (open inline dropdown of
+    configured providers — DeepSeek / Gemini / OpenAI), and <strong>Resolve manually</strong> (give up on
+    AI for this hunk, fall through to Local/Remote/Edit). The reasoning panel mirrors the
+    failure with the raw error message so users can paste it into the docs when reporting.
+    <strong>Local and Remote remain fully usable</strong> — the failure doesn't block the user.
+  </p>
+
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-header-top">
+        <button class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+          Conflicts
+        </button>
+        <div class="modal-title">notes / <span class="filename">Project Alpha.md</span></div>
+        <div class="header-icons">
+          <button><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></button>
+          <button><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></button>
+          <button><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+        </div>
+      </div>
+      <div class="modal-header-meta">
+        Repo <code>my-knowledge</code> <span class="dot">·</span>
+        branch <code>main</code> ← <code>origin/main</code> <span class="dot">·</span>
+        last sync 2 min ago
+      </div>
+    </div>
+
+    <div class="modal-body">
+      <aside class="files-pane">
+        <h4>Files (5)</h4>
+        <div class="file-group">
+          <div class="file-group-header">
+            <svg class="chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+            notes
+          </div>
+          <ul class="file-list">
+            <li class="current"><span class="file-badge current">●</span><span>Project Alpha.md</span></li>
+            <li><span class="file-badge unresolved">✗</span><span>Notes2.md</span></li>
+          </ul>
+        </div>
+        <div class="legend">
+          <div class="legend-row"><span class="file-badge current">●</span> current</div>
+          <div class="legend-row"><span class="file-badge unresolved">✗</span> unresolved</div>
+          <div class="legend-row"><span class="file-badge resolved">✓</span> resolved</div>
+        </div>
+      </aside>
+
+      <div class="main-pane">
+        <div class="hunk-nav">
+          <span class="hunk-label">Hunk 1 of 3</span>
+          <div class="nav-btns">
+            <button class="disabled">Prev</button>
+            <button>Next</button>
+          </div>
+          <div class="confidence">
+            AI confidence:
+            <span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
+            <span class="label" style="color:var(--color-red)">unavailable</span>
+          </div>
+        </div>
+
+        <div class="diff-grid">
+          <div class="diff-pane">
+            <div class="diff-pane-header">Local <span class="branch-tag">you</span><span class="meta">14:02</span></div>
+            <div class="diff-body">
+              <div class="diff-line"><span class="lineno">12</span><span class="marker"> </span><span class="code">## Goals</span></div>
+              <div class="diff-line del"><span class="lineno">13</span><span class="marker">-</span><span class="code">- Ship by Q3</span></div>
+              <div class="diff-line del"><span class="lineno">14</span><span class="marker">-</span><span class="code">- Hire 2 engineers</span></div>
+              <div class="diff-line"><span class="lineno">15</span><span class="marker"> </span><span class="code"></span></div>
+              <div class="diff-line"><span class="lineno">16</span><span class="marker"> </span><span class="code">## Milestones</span></div>
+              <div class="diff-line del"><span class="lineno">17</span><span class="marker">-</span><span class="code">- Alpha demo Aug 30</span></div>
+            </div>
+          </div>
+          <div class="diff-pane">
+            <div class="diff-pane-header">Remote <span class="branch-tag">origin</span><span class="meta">13:55</span></div>
+            <div class="diff-body">
+              <div class="diff-line"><span class="lineno">12</span><span class="marker"> </span><span class="code">## Goals</span></div>
+              <div class="diff-line add"><span class="lineno">13</span><span class="marker">+</span><span class="code">- Ship by Q2</span></div>
+              <div class="diff-line add"><span class="lineno">14</span><span class="marker">+</span><span class="code">- Hire 1 eng + 1 PM</span></div>
+              <div class="diff-line"><span class="lineno">15</span><span class="marker"> </span><span class="code"></span></div>
+              <div class="diff-line"><span class="lineno">16</span><span class="marker"> </span><span class="code">## Milestones</span></div>
+              <div class="diff-line add"><span class="lineno">17</span><span class="marker">+</span><span class="code">- Alpha demo Aug 15</span></div>
+            </div>
+          </div>
+          <div class="diff-pane ai">
+            <div class="diff-pane-header" style="background:rgba(251,70,76,0.12); border-bottom-color:rgba(251,70,76,0.35)">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--color-red)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+              <span style="color:var(--color-red)">AI Suggestion failed</span>
+              <span class="meta">just now</span>
+            </div>
+            <div class="diff-body" style="background:transparent">
+              <div class="error-card">
+                <div class="error-card-header">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                  DeepSeek API returned 429
+                </div>
+                <div class="error-card-body">
+                  Rate limit exceeded for the current minute. You've hit <code>40 req/min</code> on the free tier.
+                  Try again in <code>~24s</code>, switch to a different provider, or resolve this hunk manually.
+                </div>
+                <div class="error-card-actions">
+                  <button>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                    Retry
+                  </button>
+                  <button>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
+                    Switch provider →
+                  </button>
+                  <button>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                    Resolve manually
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hunk-actions">
+          <button>Take Local</button>
+          <button>Take Remote</button>
+          <button class="primary disabled">
+            <svg class="star" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15 9 22 9 17 14 19 21 12 17 5 21 7 14 2 9 9 9 12 2"></polygon></svg>
+            Take AI
+          </button>
+          <button>Edit manually</button>
+          <button class="ghost">Skip hunk</button>
+        </div>
+
+        <div class="ai-reasoning" style="background:rgba(251,70,76,0.05); border-color:rgba(251,70,76,0.3)">
+          <div class="ai-reasoning-header" style="color:var(--color-red)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+            Provider error
+          </div>
+          <ul>
+            <li><strong>HTTP 429</strong> from <code style="font-family:var(--font-mono);background:var(--background-primary);padding:1px 5px;border-radius:3px">api.deepseek.com/v1/chat/completions</code></li>
+            <li>Response: <code style="font-family:var(--font-mono);background:var(--background-primary);padding:1px 5px;border-radius:3px">{"error":{"message":"Rate limit exceeded","code":"rate_limit_exceeded"}}</code></li>
+          </ul>
+          <div class="model-info">
+            <span>Endpoint: <strong style="color:var(--text-normal)">deepseek-chat</strong></span>
+            <span>Configured fallback: <strong style="color:var(--text-normal)">gemini-1.5-flash</strong></span>
+            <span>Retry in <strong style="color:var(--color-orange)">24s</strong></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <div class="progress"><strong>0/3</strong> hunks resolved in this file · <strong>4</strong> files remaining</div>
+      <div class="spacer"></div>
+      <button class="bulk-ai disabled">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15 9 22 9 17 14 19 21 12 17 5 21 7 14 2 9 9 9 12 2"></polygon></svg>
+        Resolve all remaining with AI
+      </button>
+      <button>Cancel</button>
+      <button class="primary disabled">Save &amp; next file</button>
+    </div>
+  </div>
+</section>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     STATE 4 — MANUAL EDIT
+     ════════════════════════════════════════════════════════════ -->
+<section id="state-edit" class="state-section">
+  <span class="state-label">State 4</span>
+  <h2>Manual Edit — inline textarea</h2>
+  <p class="state-desc">
+    Clicking "Edit manually" replaces the AI pane with a focused textarea pre-filled with the
+    AI suggestion (or, if AI failed, with Local content as the starting point). The pane border
+    glows with accent color to indicate active focus. Hunk actions collapse to
+    <strong>Save edit</strong> / <strong>Cancel</strong>. Keyboard shortcuts shown in the hint strip below
+    the editor (<kbd>⌘</kbd>+<kbd>Enter</kbd> to save, <kbd>Esc</kbd> to revert). Local/Remote panes
+    stay visible so the user can copy-paste fragments while editing.
+  </p>
+
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-header-top">
+        <button class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+          Conflicts
+        </button>
+        <div class="modal-title">notes / <span class="filename">Project Alpha.md</span> <span style="color:var(--color-accent); font-size:11px; margin-left:8px; background:var(--color-accent-1); padding:2px 6px; border-radius:3px">EDITING</span></div>
+        <div class="header-icons">
+          <button><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></button>
+          <button><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+        </div>
+      </div>
+      <div class="modal-header-meta">
+        Repo <code>my-knowledge</code> <span class="dot">·</span>
+        branch <code>main</code> ← <code>origin/main</code>
+      </div>
+    </div>
+
+    <div class="modal-body">
+      <aside class="files-pane">
+        <h4>Files (5)</h4>
+        <div class="file-group">
+          <div class="file-group-header">
+            <svg class="chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+            notes
+          </div>
+          <ul class="file-list">
+            <li class="current"><span class="file-badge current">●</span><span>Project Alpha.md</span></li>
+            <li><span class="file-badge unresolved">✗</span><span>Notes2.md</span></li>
+          </ul>
+        </div>
+        <div class="legend">
+          <div class="legend-row"><span class="file-badge current">●</span> current</div>
+          <div class="legend-row"><span class="file-badge unresolved">✗</span> unresolved</div>
+          <div class="legend-row"><span class="file-badge resolved">✓</span> resolved</div>
+        </div>
+      </aside>
+
+      <div class="main-pane">
+        <div class="hunk-nav">
+          <span class="hunk-label">Hunk 1 of 3 — editing</span>
+          <div class="nav-btns">
+            <button class="disabled">Prev</button>
+            <button class="disabled">Next</button>
+          </div>
+          <div class="confidence">
+            <span style="color:var(--text-faint); font-style:italic">Save or cancel edit to navigate</span>
+          </div>
+        </div>
+
+        <div class="diff-grid">
+          <div class="diff-pane">
+            <div class="diff-pane-header">Local <span class="branch-tag">you</span><span class="meta">14:02</span></div>
+            <div class="diff-body">
+              <div class="diff-line"><span class="lineno">12</span><span class="marker"> </span><span class="code">## Goals</span></div>
+              <div class="diff-line del"><span class="lineno">13</span><span class="marker">-</span><span class="code">- Ship by Q3</span></div>
+              <div class="diff-line del"><span class="lineno">14</span><span class="marker">-</span><span class="code">- Hire 2 engineers</span></div>
+              <div class="diff-line"><span class="lineno">15</span><span class="marker"> </span><span class="code"></span></div>
+              <div class="diff-line"><span class="lineno">16</span><span class="marker"> </span><span class="code">## Milestones</span></div>
+              <div class="diff-line del"><span class="lineno">17</span><span class="marker">-</span><span class="code">- Alpha demo Aug 30</span></div>
+            </div>
+          </div>
+          <div class="diff-pane">
+            <div class="diff-pane-header">Remote <span class="branch-tag">origin</span><span class="meta">13:55</span></div>
+            <div class="diff-body">
+              <div class="diff-line"><span class="lineno">12</span><span class="marker"> </span><span class="code">## Goals</span></div>
+              <div class="diff-line add"><span class="lineno">13</span><span class="marker">+</span><span class="code">- Ship by Q2</span></div>
+              <div class="diff-line add"><span class="lineno">14</span><span class="marker">+</span><span class="code">- Hire 1 eng + 1 PM</span></div>
+              <div class="diff-line"><span class="lineno">15</span><span class="marker"> </span><span class="code"></span></div>
+              <div class="diff-line"><span class="lineno">16</span><span class="marker"> </span><span class="code">## Milestones</span></div>
+              <div class="diff-line add"><span class="lineno">17</span><span class="marker">+</span><span class="code">- Alpha demo Aug 15</span></div>
+            </div>
+          </div>
+          <div class="diff-pane ai" style="background:var(--background-primary)">
+            <div class="diff-pane-header">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+              <span style="color:var(--text-normal); font-weight:600">Manual edit</span>
+              <span class="meta" style="color:var(--color-accent)">● unsaved</span>
+            </div>
+            <textarea class="edit-textarea" spellcheck="false">## Goals
+- Ship by Q2
+- Hire 1 eng + 1 PM + 1 senior engineer
+
+## Milestones
+- Alpha demo Aug 15
+- Beta freeze Sept 1</textarea>
+            <div class="edit-hint">
+              <kbd>⌘</kbd>+<kbd>Enter</kbd> save edit · <kbd>Esc</kbd> revert · <kbd>⌘</kbd>+<kbd>K</kbd> reset to AI suggestion
+            </div>
+          </div>
+        </div>
+
+        <div class="hunk-actions">
+          <div class="spacer"></div>
+          <button class="ghost">Cancel</button>
+          <button class="primary">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            Save edit
+          </button>
+        </div>
+
+        <div class="ai-reasoning">
+          <div class="ai-reasoning-header" style="color:var(--text-muted)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+            Editing manually
+          </div>
+          <ul>
+            <li style="color:var(--text-muted)">Started from AI suggestion. Your edit will commit as the resolved version for hunk 1.</li>
+            <li style="color:var(--text-muted)">Use the Local / Remote panes on the left as reference — copy-paste works.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <div class="progress"><strong>0/3</strong> hunks resolved · editing hunk 1</div>
+      <div class="spacer"></div>
+      <button class="disabled">Cancel modal</button>
+      <button class="primary disabled">Save &amp; next file</button>
+    </div>
+  </div>
+</section>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     STATE 5 — ALL RESOLVED
+     ════════════════════════════════════════════════════════════ -->
+<section id="state-resolved" class="state-section">
+  <span class="state-label">State 5</span>
+  <h2>All Resolved — ready to commit</h2>
+  <p class="state-desc">
+    All conflicts cleared (across all files, not just this file). The three-pane area collapses
+    into a centered success summary with the stat breakdown: how many hunks the user took,
+    how many AI handled, total token spend. A pre-filled commit message field gives the user
+    one last chance to edit before push. <strong>Primary action is "Commit &amp; push"</strong>;
+    secondary is "Review diff" (opens a read-only review of the merged result).
+    Left sidebar persists so the user can verify all files are ✓.
+  </p>
+
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-header-top">
+        <button class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+          Conflicts
+        </button>
+        <div class="modal-title">All files resolved · <span class="filename">5/5</span></div>
+        <div class="header-icons">
+          <button><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></button>
+          <button><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+        </div>
+      </div>
+      <div class="modal-header-meta">
+        Repo <code>my-knowledge</code> <span class="dot">·</span>
+        branch <code>main</code> ← <code>origin/main</code> <span class="dot">·</span>
+        merge ready
+      </div>
+    </div>
+
+    <div class="modal-body">
+      <aside class="files-pane">
+        <h4>Files (5)</h4>
+        <div class="file-group">
+          <div class="file-group-header">
+            <svg class="chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+            docs
+          </div>
+          <ul class="file-list">
+            <li><span class="file-badge resolved">✓</span><span>README.md</span></li>
+          </ul>
+        </div>
+        <div class="file-group">
+          <div class="file-group-header">
+            <svg class="chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+            notes
+          </div>
+          <ul class="file-list">
+            <li><span class="file-badge resolved">✓</span><span>Project Alpha.md</span></li>
+            <li><span class="file-badge resolved">✓</span><span>Notes2.md</span></li>
+          </ul>
+        </div>
+        <div class="file-group">
+          <div class="file-group-header">
+            <svg class="chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+            inbox
+          </div>
+          <ul class="file-list">
+            <li><span class="file-badge resolved">✓</span><span>todo.md</span></li>
+            <li><span class="file-badge resolved">✓</span><span>idea.md</span></li>
+          </ul>
+        </div>
+        <div class="legend">
+          <div class="legend-row" style="color:var(--color-green)"><span class="file-badge resolved">✓</span> all clear</div>
+        </div>
+      </aside>
+
+      <div class="resolved-summary">
+        <div class="resolved-icon">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        </div>
+        <h3>All conflicts resolved</h3>
+        <p class="subtitle">
+          5 files merged across 12 hunks. Review the commit message below, then push to origin/main.
+        </p>
+
+        <div class="resolved-stats">
+          <div class="stat">
+            <span class="num green">12</span>
+            <span class="lbl">hunks resolved</span>
+          </div>
+          <div class="stat">
+            <span class="num ai">8</span>
+            <span class="lbl">AI decided</span>
+          </div>
+          <div class="stat">
+            <span class="num">3</span>
+            <span class="lbl">manual</span>
+          </div>
+          <div class="stat">
+            <span class="num">1</span>
+            <span class="lbl">edited</span>
+          </div>
+          <div class="stat">
+            <span class="num">5.2k</span>
+            <span class="lbl">tokens · ~$0.013</span>
+          </div>
+        </div>
+
+        <div class="resolved-commit">
+          <label>Commit message</label>
+          <input value="merge: resolve 12 hunks across 5 files (AI-assisted)" />
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <div class="progress" style="color:var(--color-green)">
+        <strong>✓ Ready</strong> · working tree clean after merge
+      </div>
+      <div class="spacer"></div>
+      <button>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+        Review diff
+      </button>
+      <button>Cancel</button>
+      <button class="primary">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+        Commit &amp; push
+      </button>
+    </div>
+  </div>
+</section>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     LOW-CONFIDENCE banner variant note
+     ════════════════════════════════════════════════════════════ -->
+<section class="state-section">
+  <span class="state-label">Variant note</span>
+  <h2>Low-confidence banner (overlay on Idle)</h2>
+  <p class="state-desc">
+    When AI confidence drops to ≤2 dots, an orange banner inserts above the hunk navigator and
+    "Resolve all remaining with AI" goes <strong>disabled</strong>. Per design decision #3 — confidence
+    is the gating mechanism for batch actions. Below is just the banner alone (drop in above
+    the State 1 modal's hunk-nav row).
+  </p>
+
+  <div class="modal" style="height:auto">
+    <div class="modal-header" style="border-bottom:none">
+      <div class="modal-header-top">
+        <button class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+          Conflicts
+        </button>
+        <div class="modal-title">notes / <span class="filename">Project Alpha.md</span></div>
+      </div>
+      <div class="modal-header-meta">Repo <code>my-knowledge</code> · branch <code>main</code></div>
+    </div>
+    <div class="low-conf-banner">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+      <strong style="color:var(--text-normal)">AI uncertain on this hunk</strong>
+      <span>— please review the suggestion carefully before accepting. Bulk "Resolve all" is disabled until confidence recovers.</span>
+    </div>
+    <div class="hunk-nav">
+      <span class="hunk-label">Hunk 2 of 3</span>
+      <div class="nav-btns"><button>Prev</button><button>Next</button></div>
+      <div class="confidence low">
+        AI confidence:
+        <span class="dots"><span class="dot on"></span><span class="dot on"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
+        <span class="label">low</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<p class="footer-note">
+  Ready for review. To preview locally: <code style="font-family:var(--font-mono); background:#161616; padding:2px 6px; border-radius:3px">open design/mockups/conflict-resolution.html</code><br />
+  Once approved, next mockup is <strong>Page 2 — Settings: AI Providers + AI Privacy</strong>.
+</p>
+
+</body>
+</html>

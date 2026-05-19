@@ -1,0 +1,222 @@
+import { requestUrl } from "obsidian";
+
+/**
+ * Parse owner/repo from any GitHub URL form we accept (https or ssh-style,
+ * with or without `.git` suffix). Returns null when it doesn't look like
+ * github.com.
+ */
+export function parseOwnerRepo(url: string): { owner: string; repo: string } | null {
+  const m = url.match(/github\.com[:/]([\w.-]+)\/([\w.-]+?)(\.git)?\/?$/);
+  if (!m) return null;
+  return { owner: m[1], repo: m[2] };
+}
+
+export interface RepoAccessCheck {
+  ok: boolean;
+  // populated when ok === true
+  fullName?: string;
+  canPush?: boolean;
+  isEmpty?: boolean;
+  // populated when ok === false
+  status?: number;
+  reason?: string;
+}
+
+// Minimal shape of the GitHub API responses we read. We only declare the
+// fields actually accessed by the plugin — the real responses contain
+// many more keys.
+export interface GitHubUser {
+  login: string;
+  name?: string | null;
+  email?: string | null;
+}
+
+interface GitHubRepo {
+  full_name: string;
+  permissions?: { push?: boolean };
+}
+
+interface GitHubErrorBody {
+  message?: string;
+}
+
+function isString(v: unknown): v is string {
+  return typeof v === "string";
+}
+
+type TokenKind = "fine-grained" | "classic" | "other";
+
+/**
+ * Classify a GitHub token by its prefix. The distinction matters for 404
+ * diagnostics: a fine-grained PAT (`github_pat_`) only sees repositories
+ * explicitly added to its "Repository access" list, so "repo not found"
+ * is most often a missing grant rather than a missing repo — which needs
+ * very different remediation than a classic token.
+ */
+function classifyToken(token: string): TokenKind {
+  if (token.startsWith("github_pat_")) return "fine-grained";
+  if (token.startsWith("ghp_") || /^[0-9a-f]{40}$/i.test(token)) return "classic";
+  return "other";
+}
+
+/**
+ * GitHub returns an identical 404 for "repo doesn't exist" and "repo
+ * exists but this token isn't authorized to see it" — deliberately, so
+ * private-repo existence can't be probed. That ambiguity is the single
+ * most confusing failure for non-technical users, especially with
+ * fine-grained PATs where the repo allowlist is easy to forget.
+ *
+ * We disambiguate as far as the API allows with two extra probes:
+ *   1. GET /user with the token  → is the token itself valid at all?
+ *   2. GET /repos/:o/:r WITHOUT auth → does the repo exist & is public?
+ * then build an actionable message keyed on the token kind.
+ */
+// Obsidian's requestUrl() typings expose `status`/`json` as `any`; a full
+// typed-wrapper refactor is deferred. Suppress the unsafe-access rules for
+// this function so the rest of the file keeps strict typing.
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+async function explainNotFound(
+  owner: string,
+  repo: string,
+  token: string,
+): Promise<string> {
+  const slug = `${owner}/${repo}`;
+  const kind = classifyToken(token);
+  const ua = { "User-Agent": "ObsidianGitHubSync" };
+
+  const userRes = await requestUrl({
+    url: "https://api.github.com/user",
+    headers: { Authorization: `token ${token}`, ...ua },
+    throw: false,
+  }).catch(() => null);
+  if (userRes && (userRes.status === 401 || userRes.status === 403)) {
+    return "Token is invalid or expired — generate a new one (GitHub → Settings → Developer settings) and paste it in Settings.";
+  }
+  const userLogin = (userRes?.json as GitHubUser | null | undefined)?.login;
+  const login = isString(userLogin) ? userLogin : null;
+
+  const pubRes = await requestUrl({
+    url: `https://api.github.com/repos/${owner}/${repo}`,
+    headers: ua,
+    throw: false,
+  }).catch(() => null);
+
+  if (pubRes?.status === 200) {
+    // Repo provably exists (public) — so a valid token getting 404 simply
+    // lacks access to it.
+    return kind === "fine-grained"
+      ? `Repo ${slug} exists, but this fine-grained token isn't granted access to it. Edit the token on GitHub → "Repository access" → add ${slug}, then set Permissions → Contents: Read and write.`
+      : `Repo ${slug} exists, but the token${login ? ` (account ${login})` : ""} can't access it. Add that account as a collaborator on the repo, or use a token from an account that has access.`;
+  }
+
+  // pubRes is 404 (private or nonexistent — GitHub hides which).
+  return kind === "fine-grained"
+    ? `Can't find ${slug}. Either it doesn't exist yet — create the repo on GitHub first — or it exists but this fine-grained token isn't granted access (fine-grained tokens only see repos explicitly added under "Repository access"). After creating it, add ${slug} to the token and grant Contents: Read and write.`
+    : `Can't find ${slug}. Either it doesn't exist yet — create the repo on GitHub first — or it's private and this token${login ? ` (account ${login})` : ""} has no access / is missing the "repo" scope.`;
+}
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+
+/**
+ * Probe a GitHub repo URL for access and write permission. Returns a
+ * structured result the caller can render in a diagnostic UI; never
+ * throws.
+ *
+ * - `status: 200 + permissions.push` → token can write
+ * - `status: 200, permissions.push=false` → token can read but not push
+ * - `status: 404` → disambiguated by explainNotFound (missing repo vs.
+ *   missing access vs. fine-grained token not granted the repo)
+ * - `status: 401/403` → token rejected (often SSO not authorized)
+ */
+export async function checkRepoAccess(
+  remoteUrl: string,
+  token: string,
+): Promise<RepoAccessCheck> {
+  const parsed = parseOwnerRepo(remoteUrl);
+  if (!parsed) {
+    return { ok: false, status: 0, reason: "Not a github.com URL" };
+  }
+  const { owner, repo } = parsed;
+  const headers = token
+    ? { Authorization: `token ${token}`, "User-Agent": "ObsidianGitHubSync" }
+    : { "User-Agent": "ObsidianGitHubSync" };
+  const res = await requestUrl({
+    url: `https://api.github.com/repos/${owner}/${repo}`,
+    headers,
+    throw: false,
+  });
+  if (res.status !== 200) {
+    const apiMsg = (res.json as GitHubErrorBody | null | undefined)?.message;
+    const reason =
+      res.status === 404 ? (token ? await explainNotFound(owner, repo, token) : "Repository not found (or it's private and no token was given)")
+      : res.status === 401 ? "Token is invalid or expired — generate a new one and paste it in Settings."
+      : res.status === 403 ? (isString(apiMsg) && apiMsg.includes("SAML") ? "SSO not authorized for this token — open the token on GitHub and authorize SSO for this org." : "Access forbidden")
+      : `GitHub returned ${res.status}`;
+    return { ok: false, status: res.status, reason };
+  }
+  const repoBody = res.json as GitHubRepo | null;
+  const fullName = repoBody?.full_name ?? `${owner}/${repo}`;
+  const canPush = !!repoBody?.permissions?.push;
+  // Cheap follow-up: check for empty repo (only matters for diagnostic
+  // completeness — auto-init already handles it).
+  const commits = await requestUrl({
+    url: `https://api.github.com/repos/${owner}/${repo}/commits?per_page=1`,
+    headers,
+    throw: false,
+  });
+  const isEmpty = commits.status === 409;
+  return { ok: true, fullName, canPush, isEmpty };
+}
+
+/**
+ * If the remote GitHub repo has no commits, create an initial README via
+ * the Contents API so subsequent git operations (clone, submodule add,
+ * push --set-upstream) have a default branch to work with.
+ *
+ * No-op if the remote already has commits, isn't on github.com, or we
+ * have no token. Throws only on a hard failure that we want to surface
+ * to the user.
+ *
+ * Why this matters: non-technical users routinely create a GitHub repo
+ * via the web UI and try to connect it before pushing anything. Bare git
+ * fails with cryptic "branch yet to be born" / "couldn't find remote ref"
+ * messages — this turns the empty-repo case into a silent success.
+ */
+export async function ensureRemoteHasCommits(
+  remoteUrl: string,
+  token: string,
+): Promise<void> {
+  if (!token) return; // no creds → leave it to git layer
+  const parsed = parseOwnerRepo(remoteUrl);
+  if (!parsed) return; // not github.com — nothing to do via API
+  const { owner, repo } = parsed;
+
+  const headers = {
+    Authorization: `token ${token}`,
+    "User-Agent": "ObsidianGitHubSync",
+  };
+
+  // Probe: GitHub returns 409 "Git Repository is empty." for repos with no commits.
+  const probe = await requestUrl({
+    url: `https://api.github.com/repos/${owner}/${repo}/commits?per_page=1`,
+    headers,
+    throw: false,
+  });
+  if (probe.status !== 409) return; // 200 = has commits; 404/401/403 = let git surface it
+
+  // Create an initial README on the repo's default branch (empty repos
+  // auto-create the default branch on first PUT — don't pass an explicit
+  // `branch` because that branch doesn't exist yet).
+  const res = await requestUrl({
+    url: `https://api.github.com/repos/${owner}/${repo}/contents/README.md`,
+    method: "PUT",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message: "Initialize repository",
+      content: btoa(`# ${repo}\n`),
+    }),
+    throw: false,
+  });
+  if (res.status !== 201 && res.status !== 200) {
+    throw new Error(`Couldn't initialize empty repository (HTTP ${res.status}).`);
+  }
+}

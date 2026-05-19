@@ -1,0 +1,1255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>GitHub Sync — Settings: AI Providers &amp; Privacy</title>
+<style>
+  /* ───────────────────────────────────────────────────────────────
+     Obsidian dark theme tokens — same set as conflict-resolution.html
+     so the two mockups share one design language.
+     ─────────────────────────────────────────────────────────────── */
+  :root {
+    --background-primary:        #1e1e1e;
+    --background-primary-alt:    #1a1a1a;
+    --background-secondary:      #262626;
+    --background-secondary-alt:  #2a2a2a;
+    --background-modifier-border:#393939;
+    --background-modifier-hover: #2f2f2f;
+    --background-modifier-active:#383838;
+
+    --text-normal:  #dcddde;
+    --text-muted:   #b3b3b3;
+    --text-faint:   #777;
+    --text-on-accent:#ffffff;
+
+    --color-accent: #7c4dff;
+    --color-accent-hover: #8d65ff;
+    --color-accent-1: rgba(124, 77, 255, 0.15);
+    --color-red:    #fb464c;
+    --color-green:  #44cf6e;
+    --color-yellow: #e0ac00;
+    --color-orange: #e9973f;
+    --color-blue:   #027aff;
+
+    --ai-pick-marker: #a78bfa;
+
+    --font-ui:   -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  /* Gallery chrome (not part of plugin) */
+  html, body { margin: 0; padding: 0; background: #0d0d0d; color: var(--text-normal); font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
+  .gallery-header { max-width: 960px; margin: 48px auto 16px; padding: 0 24px; }
+  .gallery-header h1 { font-size: 22px; font-weight: 600; margin: 0 0 6px; }
+  .gallery-header p { font-size: 13px; color: var(--text-muted); margin: 0; line-height: 1.55; }
+  .gallery-toc { max-width: 960px; margin: 24px auto 48px; padding: 16px 24px; background: #161616; border: 1px solid #222; border-radius: 10px; font-size: 13px; }
+  .gallery-toc ol { margin: 0; padding-left: 22px; line-height: 1.85; }
+  .gallery-toc a { color: var(--text-normal); text-decoration: none; }
+  .gallery-toc a:hover { color: var(--color-accent); }
+  .gallery-toc .toc-note { color: var(--text-faint); margin-left: 8px; }
+  .state-section { max-width: 960px; margin: 0 auto 64px; padding: 0 24px; }
+  .state-label { display: inline-block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--color-accent); background: var(--color-accent-1); padding: 4px 10px; border-radius: 4px; margin-bottom: 12px; }
+  .state-section h2 { font-size: 18px; font-weight: 600; margin: 0 0 6px; }
+  .state-section .state-desc { font-size: 13px; color: var(--text-muted); line-height: 1.6; margin: 0 0 20px; max-width: 800px; }
+  .state-section .state-desc strong { color: var(--text-normal); }
+
+  /* ───────────────────────────────────────────────────────────────
+     Settings panel — actual plugin UI
+     ─────────────────────────────────────────────────────────────── */
+  .settings-panel {
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 10px;
+    overflow: hidden;
+    color: var(--text-normal);
+    font-size: 13px;
+    box-shadow: 0 20px 56px rgba(0,0,0,0.55);
+  }
+
+  /* Tabs bar (Obsidian-style settings nav) */
+  .settings-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--background-modifier-border);
+    background: var(--background-secondary);
+    padding: 0 20px;
+    overflow-x: auto;
+  }
+  .settings-tabs .tab {
+    padding: 12px 14px;
+    color: var(--text-muted);
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .settings-tabs .tab:hover { color: var(--text-normal); }
+  .settings-tabs .tab.active {
+    color: var(--text-normal);
+    border-bottom-color: var(--color-accent);
+    font-weight: 600;
+  }
+  .settings-tabs .tab .badge {
+    display: inline-block;
+    background: var(--color-accent-1);
+    color: var(--ai-pick-marker);
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    margin-left: 5px;
+    font-weight: 500;
+  }
+
+  .settings-body {
+    padding: 0;
+  }
+
+  /* Section blocks */
+  .section {
+    padding: 22px 28px;
+    border-bottom: 1px solid var(--background-modifier-border);
+  }
+  .section:last-child { border-bottom: none; }
+
+  .section-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+  .section-header .icon-wrap {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: var(--color-accent-1);
+    color: var(--ai-pick-marker);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .section-header .titles { flex: 1; min-width: 0; }
+  .section-header h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0 0 3px;
+    color: var(--text-normal);
+  }
+  .section-header p {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    margin: 0;
+    line-height: 1.55;
+  }
+  .section-header .header-action {
+    flex-shrink: 0;
+  }
+  .section-header .header-action button {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    color: var(--text-normal);
+    padding: 5px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .section-header .header-action button:hover { background: var(--background-modifier-hover); }
+
+  /* ── Provider cards ───────────────────────────────────────── */
+  .provider-list { display: flex; flex-direction: column; gap: 10px; }
+  .provider-card {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .provider-card.expanded {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 1px var(--color-accent-1);
+  }
+  .provider-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 16px;
+    cursor: pointer;
+  }
+  .provider-row:hover { background: var(--background-modifier-hover); }
+
+  .provider-logo {
+    width: 34px;
+    height: 34px;
+    border-radius: 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 14px;
+    color: white;
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+  }
+  .provider-logo.deepseek { background: linear-gradient(135deg, #4f46e5, #7c3aed); }
+  .provider-logo.gemini   { background: linear-gradient(135deg, #1e88e5, #00bcd4); }
+  .provider-logo.openai   { background: linear-gradient(135deg, #10a37f, #0e8e6c); }
+  .provider-logo.custom   { background: #393939; color: var(--text-muted); }
+
+  .provider-info { flex: 1; min-width: 0; }
+  .provider-name {
+    font-weight: 600;
+    color: var(--text-normal);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13.5px;
+  }
+  .provider-meta {
+    font-size: 11.5px;
+    color: var(--text-faint);
+    margin-top: 2px;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .provider-meta code {
+    font-family: var(--font-mono);
+    background: var(--background-primary);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--text-muted);
+    font-size: 10.5px;
+  }
+
+  /* Status badges */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+  }
+  .status-badge .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .status-badge.connected { background: rgba(68,207,110,0.12); color: var(--color-green); }
+  .status-badge.connected .dot { background: var(--color-green); box-shadow: 0 0 4px var(--color-green); }
+  .status-badge.fallback { background: rgba(124,77,255,0.12); color: var(--ai-pick-marker); }
+  .status-badge.fallback .dot { background: var(--ai-pick-marker); }
+  .status-badge.disabled { background: var(--background-modifier-hover); color: var(--text-faint); }
+  .status-badge.disabled .dot { background: var(--text-faint); }
+  .status-badge.error { background: rgba(251,70,76,0.12); color: var(--color-red); }
+  .status-badge.error .dot { background: var(--color-red); }
+
+  /* Usage bar */
+  .usage {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    min-width: 180px;
+  }
+  .usage-meta {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+  }
+  .usage-meta strong { color: var(--text-normal); font-weight: 500; }
+  .usage-bar {
+    width: 160px;
+    height: 4px;
+    background: var(--background-primary);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .usage-bar .fill { height: 100%; background: var(--color-green); }
+  .usage-bar .fill.warn { background: var(--color-orange); }
+  .usage-bar .fill.over { background: var(--color-red); }
+
+  /* Toggle + chevron */
+  .provider-controls { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+
+  .toggle {
+    position: relative;
+    width: 32px;
+    height: 18px;
+    background: var(--background-modifier-border);
+    border-radius: 9px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .toggle::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    background: #ccc;
+    border-radius: 50%;
+    transition: transform 0.15s, background 0.15s;
+  }
+  .toggle.on { background: var(--color-accent); }
+  .toggle.on::after { transform: translateX(14px); background: white; }
+  .toggle.large { width: 36px; height: 20px; border-radius: 10px; }
+  .toggle.large::after { width: 16px; height: 16px; }
+  .toggle.large.on::after { transform: translateX(16px); }
+
+  .chevron-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-faint);
+    cursor: pointer;
+    padding: 4px;
+    display: inline-flex;
+    transition: transform 0.15s;
+  }
+  .chevron-btn.open { transform: rotate(90deg); }
+
+  /* Expanded provider settings */
+  .provider-expanded {
+    padding: 0 16px 16px 64px;
+    border-top: 1px solid var(--background-modifier-border);
+    background: var(--background-primary-alt);
+  }
+  .field-row {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 16px;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px dashed var(--background-modifier-border);
+  }
+  .field-row:last-child { border-bottom: none; }
+  .field-row label {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+  .field-row .field-control {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .field-row input[type="text"], .field-row input[type="password"], .field-row input[type="number"], .field-row select {
+    flex: 1;
+    padding: 6px 10px;
+    border-radius: 5px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-size: 12.5px;
+    font-family: var(--font-mono);
+    box-sizing: border-box;
+  }
+  .field-row input:focus { outline: none; border-color: var(--color-accent); box-shadow: 0 0 0 2px var(--color-accent-1); }
+  .field-row .small-btn {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    color: var(--text-muted);
+    padding: 5px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .field-row .small-btn:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+  .field-row .small-btn.test { color: var(--text-normal); }
+  .field-row .hint {
+    grid-column: 2;
+    font-size: 11.5px;
+    color: var(--text-faint);
+    margin-top: -6px;
+    line-height: 1.5;
+  }
+  .field-row .hint a { color: var(--color-accent); text-decoration: none; }
+  .field-row .hint .check-icon { color: var(--color-green); margin-right: 4px; }
+
+  /* Add provider row */
+  .add-provider {
+    background: var(--background-secondary);
+    border: 1px dashed var(--background-modifier-border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    color: var(--text-muted);
+  }
+  .add-provider:hover { background: var(--background-modifier-hover); color: var(--text-normal); border-color: var(--color-accent); }
+  .add-provider .plus {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--background-modifier-border);
+    color: var(--text-normal);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .add-provider:hover .plus { background: var(--color-accent); color: white; }
+  .add-provider .add-meta {
+    font-size: 11.5px;
+    color: var(--text-faint);
+    margin-top: 2px;
+  }
+
+  /* ── Fallback chain ───────────────────────────────────────── */
+  .fallback-chain {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    flex-wrap: wrap;
+  }
+  .chain-step {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    font-size: 12.5px;
+    cursor: grab;
+    user-select: none;
+  }
+  .chain-step .drag-handle { color: var(--text-faint); }
+  .chain-step .order { font-size: 11px; color: var(--text-faint); font-family: var(--font-mono); }
+  .chain-step .x { color: var(--text-faint); cursor: pointer; margin-left: 4px; }
+  .chain-step .x:hover { color: var(--color-red); }
+  .chain-step.fallback-final {
+    background: transparent;
+    border-style: dashed;
+    color: var(--text-muted);
+    cursor: default;
+  }
+  .chain-arrow {
+    color: var(--text-faint);
+    font-size: 14px;
+  }
+  .chain-hint {
+    margin-top: 10px;
+    font-size: 11.5px;
+    color: var(--text-faint);
+  }
+
+  /* ── Privacy toggles ──────────────────────────────────────── */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--background-modifier-border);
+  }
+  .toggle-row:last-child { border-bottom: none; }
+  .toggle-row .info { flex: 1; }
+  .toggle-row .info-title { font-weight: 500; color: var(--text-normal); margin-bottom: 3px; font-size: 13.5px; }
+  .toggle-row .info-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+  .toggle-row .info-desc code { font-family: var(--font-mono); background: var(--background-secondary); padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+  .toggle-row.danger .info-title::before {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-orange);
+    margin-right: 8px;
+    vertical-align: middle;
+  }
+  .toggle-row.warning-bg {
+    background: rgba(233, 151, 63, 0.04);
+    margin: 0 -28px;
+    padding-left: 28px;
+    padding-right: 28px;
+  }
+
+  .exclude-block {
+    margin-top: 8px;
+    padding: 12px 0;
+  }
+  .exclude-block label {
+    display: block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+  .exclude-block textarea {
+    width: 100%;
+    min-height: 70px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.6;
+    resize: vertical;
+    box-sizing: border-box;
+  }
+  .exclude-block textarea:focus { outline: none; border-color: var(--color-accent); box-shadow: 0 0 0 2px var(--color-accent-1); }
+  .exclude-block .help { font-size: 11.5px; color: var(--text-faint); margin-top: 5px; }
+
+  /* Per-repo overrides table */
+  .repo-override-table {
+    margin-top: 14px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--background-secondary);
+  }
+  .repo-override-table .row {
+    display: grid;
+    grid-template-columns: 1fr 100px 100px;
+    align-items: center;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    font-size: 12.5px;
+  }
+  .repo-override-table .row:last-child { border-bottom: none; }
+  .repo-override-table .row.header {
+    background: var(--background-secondary-alt);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-faint);
+    font-weight: 600;
+  }
+  .repo-override-table .repo-name {
+    font-family: var(--font-mono);
+    color: var(--text-normal);
+  }
+  .repo-override-table .col-center {
+    text-align: center;
+    display: flex;
+    justify-content: center;
+  }
+
+  /* ── Usage section ────────────────────────────────────────── */
+  .usage-summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  .usage-card {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .usage-card .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .usage-card .value {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text-normal);
+    font-family: var(--font-mono);
+    line-height: 1.2;
+  }
+  .usage-card .value.accent { color: var(--ai-pick-marker); }
+  .usage-card .value.green { color: var(--color-green); }
+  .usage-card .sub {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+
+  /* Stacked bar chart */
+  .usage-chart-wrap {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .usage-chart-title {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .usage-chart-title select {
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    color: var(--text-normal);
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11.5px;
+  }
+  .usage-chart-bar {
+    display: flex;
+    height: 26px;
+    border-radius: 5px;
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+  .usage-chart-bar .seg {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 11px;
+    font-weight: 500;
+    font-family: var(--font-mono);
+  }
+  .usage-chart-bar .seg.deepseek { background: linear-gradient(90deg, #4f46e5, #7c3aed); }
+  .usage-chart-bar .seg.gemini   { background: linear-gradient(90deg, #1e88e5, #00bcd4); }
+  .usage-chart-bar .seg.openai   { background: linear-gradient(90deg, #10a37f, #0e8e6c); }
+  .usage-chart-bar .seg.remaining { background: var(--background-modifier-border); color: var(--text-faint); }
+  .usage-legend {
+    display: flex;
+    gap: 16px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+    flex-wrap: wrap;
+  }
+  .usage-legend .item { display: flex; align-items: center; gap: 6px; }
+  .usage-legend .swatch { width: 10px; height: 10px; border-radius: 2px; }
+  .usage-legend .swatch.deepseek { background: #7c3aed; }
+  .usage-legend .swatch.gemini   { background: #1e88e5; }
+  .usage-legend .swatch.openai   { background: #10a37f; }
+  .usage-legend .swatch.remaining { background: var(--background-modifier-border); }
+
+  .limit-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--background-modifier-border);
+    gap: 14px;
+  }
+  .limit-row:last-child { border-bottom: none; }
+  .limit-row .info-title { font-size: 13.5px; font-weight: 500; }
+  .limit-row .info-desc { font-size: 12px; color: var(--text-muted); margin-top: 3px; line-height: 1.5; }
+  .limit-row .amount-input {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .limit-row .amount-input .currency { color: var(--text-faint); font-family: var(--font-mono); }
+  .limit-row .amount-input input {
+    width: 80px;
+    padding: 6px 10px;
+    border-radius: 5px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    text-align: right;
+    box-sizing: border-box;
+  }
+  .limit-row .amount-input input:focus { outline: none; border-color: var(--color-accent); box-shadow: 0 0 0 2px var(--color-accent-1); }
+
+  /* Limit warning callout */
+  .limit-callout {
+    background: rgba(233,151,63,0.06);
+    border: 1px solid rgba(233,151,63,0.35);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .limit-callout .icon {
+    color: var(--color-orange);
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .limit-callout .text {
+    flex: 1;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--text-normal);
+  }
+  .limit-callout .text strong { color: var(--color-orange); }
+  .limit-callout .text .sub { color: var(--text-muted); font-size: 11.5px; margin-top: 3px; display: block; }
+
+  /* Footer note */
+  .footer-note {
+    text-align: center;
+    color: var(--text-faint);
+    font-size: 12px;
+    margin: 64px 24px;
+    line-height: 1.6;
+  }
+  .footer-note code { font-family: var(--font-mono); background: #161616; padding: 2px 6px; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header class="gallery-header">
+  <h1>Settings — AI Providers &amp; Privacy</h1>
+  <p>
+    Page 2 of the design plan. This is where users configure DeepSeek / Gemini / OpenAI tokens,
+    decide a fallback order when one provider rate-limits or fails, control what gets sent to AI
+    (privacy), and watch their monthly token budget. Built as a settings tab inside the existing
+    <code>GitHubSyncSettingTab</code>, not a separate modal.
+  </p>
+</header>
+
+<nav class="gallery-toc">
+  <ol>
+    <li><a href="#main">Main configured state</a> <span class="toc-note">— 3 providers (2 active + 1 disabled), DeepSeek expanded, fallback chain visible, full Privacy + Usage</span></li>
+    <li><a href="#empty">Empty state</a> <span class="toc-note">— no providers yet, single CTA to add one</span></li>
+    <li><a href="#warning">Limit-warning callout</a> <span class="toc-note">— banner that inserts at top of Usage when 80% of soft limit is hit</span></li>
+  </ol>
+</nav>
+
+<!-- ════════════════════════════════════════════════════════════
+     STATE 1 — MAIN CONFIGURED STATE
+     ════════════════════════════════════════════════════════════ -->
+<section id="main" class="state-section">
+  <span class="state-label">State 1</span>
+  <h2>Configured — 2 active providers + fallback chain</h2>
+  <p class="state-desc">
+    Four sections, each with an iconic header that mirrors the existing wizard's hero style.
+    <strong>AI Providers</strong> shows three cards: DeepSeek (expanded inline edit), Gemini (collapsed, fallback role),
+    OpenAI (disabled). <strong>Fallback chain</strong> is a draggable pill list — the active provider tries first,
+    each step is fallback for the previous. <strong>AI Privacy</strong> has a master kill-switch, three granular toggles,
+    an exclude-from-AI textarea, and a per-repo overrides table. <strong>AI Usage</strong> shows monthly token spend
+    across providers as a stacked bar with soft/hard cost limits.
+  </p>
+
+  <div class="settings-panel">
+    <!-- Tab nav (matches Obsidian settings convention) -->
+    <div class="settings-tabs">
+      <div class="tab">Authentication</div>
+      <div class="tab">Identity</div>
+      <div class="tab">Sync Behaviour</div>
+      <div class="tab">Repositories</div>
+      <div class="tab active">AI<span class="badge">2</span></div>
+      <div class="tab">Tools</div>
+    </div>
+
+    <div class="settings-body">
+
+      <!-- ── AI Providers section ────────────────────────────── -->
+      <div class="section">
+        <div class="section-header">
+          <div class="icon-wrap">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="12 2 15 9 22 9 17 14 19 21 12 17 5 21 7 14 2 9 9 9 12 2"></polygon>
+            </svg>
+          </div>
+          <div class="titles">
+            <h3>AI Providers</h3>
+            <p>Conflict resolution and commit messages can be assisted by an LLM. Add API tokens for at least one provider — others act as fallback if the first fails.</p>
+          </div>
+        </div>
+
+        <div class="provider-list">
+
+          <!-- DeepSeek (expanded) -->
+          <div class="provider-card expanded">
+            <div class="provider-row">
+              <div class="provider-logo deepseek">DS</div>
+              <div class="provider-info">
+                <div class="provider-name">
+                  DeepSeek
+                  <span class="status-badge connected"><span class="dot"></span>Connected</span>
+                </div>
+                <div class="provider-meta">
+                  Model <code>deepseek-chat</code>
+                  <span>·</span>
+                  Primary
+                </div>
+              </div>
+              <div class="usage">
+                <div class="usage-meta"><strong>12.3k</strong> / 100k tokens · ~$0.031</div>
+                <div class="usage-bar"><div class="fill" style="width:12%"></div></div>
+              </div>
+              <div class="provider-controls">
+                <div class="toggle large on"></div>
+                <button class="chevron-btn open">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </button>
+              </div>
+            </div>
+            <div class="provider-expanded">
+              <div class="field-row">
+                <label>API Token</label>
+                <div class="field-control">
+                  <input type="password" value="sk-deepseek-•••••••••••••••••••••••••••••" />
+                  <button class="small-btn" title="Reveal">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                  </button>
+                  <button class="small-btn test">Test</button>
+                </div>
+              </div>
+              <div class="field-row">
+                <label></label>
+                <div class="hint"><span class="check-icon">✓</span>Verified <strong style="color:var(--text-normal)">2 min ago</strong> · account <code style="font-family:var(--font-mono);background:var(--background-primary);padding:1px 5px;border-radius:3px;font-size:11px">jakob@example.com</code> · <a href="#">manage tokens →</a></div>
+              </div>
+              <div class="field-row">
+                <label>Model</label>
+                <div class="field-control">
+                  <select>
+                    <option>deepseek-chat (recommended)</option>
+                    <option>deepseek-coder</option>
+                    <option>deepseek-reasoner</option>
+                  </select>
+                </div>
+              </div>
+              <div class="field-row">
+                <label>Max tokens / request</label>
+                <div class="field-control">
+                  <input type="number" value="4096" style="max-width:120px" />
+                  <span style="font-size:11.5px; color:var(--text-faint)">Lower = cheaper but may truncate large hunks</span>
+                </div>
+              </div>
+              <div class="field-row">
+                <label>Temperature</label>
+                <div class="field-control">
+                  <input type="number" value="0.2" step="0.1" min="0" max="1" style="max-width:80px" />
+                  <span style="font-size:11.5px; color:var(--text-faint)">0 = deterministic (best for merges)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Gemini (collapsed, fallback) -->
+          <div class="provider-card">
+            <div class="provider-row">
+              <div class="provider-logo gemini">GM</div>
+              <div class="provider-info">
+                <div class="provider-name">
+                  Google Gemini
+                  <span class="status-badge fallback"><span class="dot"></span>Fallback</span>
+                </div>
+                <div class="provider-meta">
+                  Model <code>gemini-1.5-flash</code>
+                  <span>·</span>
+                  Used 3× this month when DeepSeek rate-limited
+                </div>
+              </div>
+              <div class="usage">
+                <div class="usage-meta"><strong>2.1k</strong> / 50k tokens · free tier</div>
+                <div class="usage-bar"><div class="fill" style="width:4%"></div></div>
+              </div>
+              <div class="provider-controls">
+                <div class="toggle large on"></div>
+                <button class="chevron-btn">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- OpenAI (disabled) -->
+          <div class="provider-card">
+            <div class="provider-row">
+              <div class="provider-logo openai">OA</div>
+              <div class="provider-info">
+                <div class="provider-name">
+                  OpenAI
+                  <span class="status-badge disabled"><span class="dot"></span>Disabled</span>
+                </div>
+                <div class="provider-meta">
+                  Model <code>gpt-4o-mini</code>
+                  <span>·</span>
+                  Token configured but provider off
+                </div>
+              </div>
+              <div class="usage">
+                <div class="usage-meta" style="color:var(--text-faint)">No usage this month</div>
+                <div class="usage-bar"><div class="fill" style="width:0%"></div></div>
+              </div>
+              <div class="provider-controls">
+                <div class="toggle large"></div>
+                <button class="chevron-btn">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Add provider -->
+          <div class="add-provider">
+            <div class="plus">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            </div>
+            <div style="flex:1">
+              <div style="color:var(--text-normal); font-weight:500;">Add another provider</div>
+              <div class="add-meta">Anthropic Claude · Ollama (local) · Custom OpenAI-compatible endpoint</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Fallback chain section ─────────────────────────────────── -->
+      <div class="section">
+        <div class="section-header">
+          <div class="icon-wrap" style="background:rgba(124,77,255,0.1)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
+          </div>
+          <div class="titles">
+            <h3>Fallback chain</h3>
+            <p>If a provider rate-limits or returns an error, the next in line is tried automatically. Drag to reorder.</p>
+          </div>
+        </div>
+
+        <div class="fallback-chain">
+          <div class="chain-step">
+            <svg class="drag-handle" width="10" height="14" viewBox="0 0 10 14" fill="currentColor"><circle cx="2" cy="3" r="1.2"/><circle cx="2" cy="7" r="1.2"/><circle cx="2" cy="11" r="1.2"/><circle cx="8" cy="3" r="1.2"/><circle cx="8" cy="7" r="1.2"/><circle cx="8" cy="11" r="1.2"/></svg>
+            <span class="order">1.</span>
+            <div class="provider-logo deepseek" style="width:20px; height:20px; font-size:9px; border-radius:4px">DS</div>
+            <span>DeepSeek</span>
+            <span class="x" title="Remove from chain">✕</span>
+          </div>
+          <span class="chain-arrow">→</span>
+          <div class="chain-step">
+            <svg class="drag-handle" width="10" height="14" viewBox="0 0 10 14" fill="currentColor"><circle cx="2" cy="3" r="1.2"/><circle cx="2" cy="7" r="1.2"/><circle cx="2" cy="11" r="1.2"/><circle cx="8" cy="3" r="1.2"/><circle cx="8" cy="7" r="1.2"/><circle cx="8" cy="11" r="1.2"/></svg>
+            <span class="order">2.</span>
+            <div class="provider-logo gemini" style="width:20px; height:20px; font-size:9px; border-radius:4px">GM</div>
+            <span>Google Gemini</span>
+            <span class="x" title="Remove from chain">✕</span>
+          </div>
+          <span class="chain-arrow">→</span>
+          <div class="chain-step fallback-final">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+            <span>Resolve manually</span>
+          </div>
+        </div>
+        <div class="chain-hint">
+          When all providers fail, the conflict modal falls through to manual resolution (Local / Remote / Edit).
+        </div>
+      </div>
+
+      <!-- ── AI Privacy section ────────────────────────────── -->
+      <div class="section">
+        <div class="section-header">
+          <div class="icon-wrap" style="background:rgba(233,151,63,0.1); color:var(--color-orange)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+          </div>
+          <div class="titles">
+            <h3>AI Privacy</h3>
+            <p>Control what file contents and metadata are sent to AI providers. Defaults are conservative — only conflicting hunks plus minimum surrounding context.</p>
+          </div>
+        </div>
+
+        <div class="toggle-row danger">
+          <div class="info">
+            <div class="info-title">Enable AI conflict resolution</div>
+            <div class="info-desc">Master switch. When off, the conflict modal shows only Local / Remote / Manual options (no AI Suggestion pane).</div>
+          </div>
+          <div class="toggle large on"></div>
+        </div>
+
+        <div class="toggle-row">
+          <div class="info">
+            <div class="info-title">Send file paths to AI</div>
+            <div class="info-desc">Lets AI use filenames and folder structure to make better merge decisions (e.g. <code>notes/Project Alpha.md</code>). Without this, AI only sees raw text.</div>
+          </div>
+          <div class="toggle large on"></div>
+        </div>
+
+        <div class="toggle-row">
+          <div class="info">
+            <div class="info-title">Send git metadata</div>
+            <div class="info-desc">Includes commit messages, author, and timestamps in the AI prompt. Helps disambiguate which version is newer.</div>
+          </div>
+          <div class="toggle large on"></div>
+        </div>
+
+        <div class="toggle-row">
+          <div class="info">
+            <div class="info-title">Send surrounding context lines</div>
+            <div class="info-desc">Adds ±10 lines around each hunk so AI has document context. Increases token spend by ~30% per conflict.</div>
+          </div>
+          <div class="toggle large on"></div>
+        </div>
+
+        <div class="exclude-block">
+          <label>Exclude from AI context</label>
+          <textarea spellcheck="false">.env
+.env.*
+secrets/**
+*.private.md
+private/**
+**/credentials.*</textarea>
+          <div class="help">Glob patterns. Conflicts in these paths skip AI entirely and fall through to manual resolution. Same syntax as the global Ignore Patterns setting.</div>
+        </div>
+
+        <div style="margin-top:18px">
+          <label style="display:block; font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-faint); margin-bottom:6px; font-weight:600">Per-repository overrides</label>
+          <div class="repo-override-table">
+            <div class="row header">
+              <span>Repository</span>
+              <span class="col-center">AI</span>
+              <span class="col-center">Auto-resolve</span>
+            </div>
+            <div class="row">
+              <span class="repo-name">leweii/my-knowledge</span>
+              <span class="col-center"><div class="toggle on"></div></span>
+              <span class="col-center"><div class="toggle on"></div></span>
+            </div>
+            <div class="row">
+              <span class="repo-name">Projects/work-secrets</span>
+              <span class="col-center"><div class="toggle"></div></span>
+              <span class="col-center"><div class="toggle"></div></span>
+            </div>
+            <div class="row">
+              <span class="repo-name">notes/personal-journal</span>
+              <span class="col-center"><div class="toggle on"></div></span>
+              <span class="col-center"><div class="toggle"></div></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── AI Usage section ──────────────────────────────── -->
+      <div class="section">
+        <div class="section-header">
+          <div class="icon-wrap" style="background:rgba(68,207,110,0.1); color:var(--color-green)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"></line><line x1="18" y1="20" x2="18" y2="4"></line><line x1="6" y1="20" x2="6" y2="16"></line></svg>
+          </div>
+          <div class="titles">
+            <h3>AI Usage</h3>
+            <p>Monthly token spend across providers. Soft limit warns you; hard limit pauses AI and falls back to manual resolution.</p>
+          </div>
+          <div class="header-action">
+            <button>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path></svg>
+              Reset counter
+            </button>
+          </div>
+        </div>
+
+        <div class="usage-summary">
+          <div class="usage-card">
+            <div class="label">This month</div>
+            <div class="value">14.4k</div>
+            <div class="sub">tokens · across all providers</div>
+          </div>
+          <div class="usage-card">
+            <div class="label">Estimated cost</div>
+            <div class="value accent">$0.037</div>
+            <div class="sub">≈ 19% of $0.20 soft limit</div>
+          </div>
+          <div class="usage-card">
+            <div class="label">Resets</div>
+            <div class="value green">May 31</div>
+            <div class="sub">in 18 days · monthly cycle</div>
+          </div>
+        </div>
+
+        <div class="usage-chart-wrap">
+          <div class="usage-chart-title">
+            <span>By provider — May 2026</span>
+            <select>
+              <option>This month</option>
+              <option>Last 30 days</option>
+              <option>All time</option>
+            </select>
+          </div>
+          <div class="usage-chart-bar">
+            <div class="seg deepseek" style="width:60%">DeepSeek 12.3k</div>
+            <div class="seg gemini"   style="width:10%">2.1k</div>
+            <div class="seg openai"   style="width:0%"></div>
+            <div class="seg remaining" style="width:30%">85.6k available</div>
+          </div>
+          <div class="usage-legend">
+            <div class="item"><span class="swatch deepseek"></span>DeepSeek · 12.3k tokens · $0.031</div>
+            <div class="item"><span class="swatch gemini"></span>Gemini · 2.1k · free tier</div>
+            <div class="item"><span class="swatch openai"></span>OpenAI · 0 (disabled)</div>
+            <div class="item"><span class="swatch remaining"></span>Budget remaining</div>
+          </div>
+        </div>
+
+        <div style="margin-top:18px">
+          <div class="limit-row">
+            <div class="info">
+              <div class="info-title">Soft limit — warn me</div>
+              <div class="info-desc">Show a banner in the dashboard when monthly cost crosses this threshold. AI keeps working.</div>
+            </div>
+            <div class="amount-input">
+              <span class="currency">$</span>
+              <input type="number" value="0.20" step="0.01" />
+              <span style="font-size:11px; color:var(--text-faint)">/ month</span>
+            </div>
+          </div>
+          <div class="limit-row">
+            <div class="info">
+              <div class="info-title">Hard limit — stop AI</div>
+              <div class="info-desc">Disable AI provider calls when this is reached. Conflict modal falls through to manual resolution until next reset.</div>
+            </div>
+            <div class="amount-input">
+              <span class="currency">$</span>
+              <input type="number" value="2.00" step="0.50" />
+              <span style="font-size:11px; color:var(--text-faint)">/ month</span>
+            </div>
+          </div>
+          <div class="limit-row">
+            <div class="info">
+              <div class="info-title">Reset day</div>
+              <div class="info-desc">When the usage counter resets each month.</div>
+            </div>
+            <div class="amount-input">
+              <select style="background: var(--background-primary); border: 1px solid var(--background-modifier-border); color: var(--text-normal); padding: 6px 10px; border-radius: 5px; font-size: 13px;">
+                <option>1st of month</option>
+                <option>15th of month</option>
+                <option>Last day of month</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     STATE 2 — EMPTY STATE (just the AI Providers section)
+     ════════════════════════════════════════════════════════════ -->
+<section id="empty" class="state-section">
+  <span class="state-label">State 2</span>
+  <h2>Empty state — no providers configured</h2>
+  <p class="state-desc">
+    What users see right after installing the plugin (or after running the setup wizard but
+    skipping the AI step). Single illustrated CTA replaces the provider list — there's nothing to
+    fall back on, and showing empty Fallback/Privacy/Usage sections would be noisy and confusing.
+  </p>
+
+  <div class="settings-panel">
+    <div class="settings-tabs">
+      <div class="tab">Authentication</div>
+      <div class="tab">Identity</div>
+      <div class="tab">Sync Behaviour</div>
+      <div class="tab">Repositories</div>
+      <div class="tab active">AI</div>
+      <div class="tab">Tools</div>
+    </div>
+
+    <div class="section" style="padding: 56px 28px; text-align:center;">
+      <div style="width:56px; height:56px; border-radius:50%; background:var(--color-accent-1); color:var(--ai-pick-marker); display:inline-flex; align-items:center; justify-content:center; margin-bottom:16px;">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15 9 22 9 17 14 19 21 12 17 5 21 7 14 2 9 9 9 12 2"></polygon></svg>
+      </div>
+      <h3 style="font-size:17px; font-weight:600; margin:0 0 8px;">No AI providers configured</h3>
+      <p style="font-size:13px; color:var(--text-muted); max-width:440px; margin:0 auto 24px; line-height:1.55;">
+        Without a provider, conflict resolution falls back to manual Local/Remote selection — same as <code style="font-family:var(--font-mono);background:var(--background-secondary);padding:1px 5px;border-radius:3px;font-size:11.5px">git mergetool</code>.
+        Add one to unlock AI Suggestion in the conflict modal.
+      </p>
+      <button style="background: var(--color-accent); border:none; color:white; padding: 9px 18px; border-radius:6px; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:7px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        Add your first provider
+      </button>
+      <div style="margin-top:18px; font-size:11.5px; color:var(--text-faint);">
+        Free tiers available on
+        <span style="color:var(--text-muted)"> DeepSeek</span> · <span style="color:var(--text-muted)">Gemini</span> · <span style="color:var(--text-muted)">Ollama (local, no API key)</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     STATE 3 — LIMIT WARNING CALLOUT
+     ════════════════════════════════════════════════════════════ -->
+<section id="warning" class="state-section">
+  <span class="state-label">State 3</span>
+  <h2>Limit-warning callout</h2>
+  <p class="state-desc">
+    Drops in at the top of the AI Usage section once monthly cost crosses 80% of the soft limit.
+    Mirrors the low-confidence banner from the conflict modal (same orange tint) for visual
+    consistency. Doesn't block — just informs.
+  </p>
+
+  <div class="settings-panel">
+    <div class="section">
+      <div class="section-header">
+        <div class="icon-wrap" style="background:rgba(68,207,110,0.1); color:var(--color-green)">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"></line><line x1="18" y1="20" x2="18" y2="4"></line><line x1="6" y1="20" x2="6" y2="16"></line></svg>
+        </div>
+        <div class="titles">
+          <h3>AI Usage</h3>
+          <p>Approaching your monthly soft limit.</p>
+        </div>
+      </div>
+
+      <div class="limit-callout">
+        <div class="icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+        </div>
+        <div class="text">
+          <strong>83% of your soft limit used</strong> — $0.166 of $0.20 spent this cycle
+          <span class="sub">At current pace, you'll hit the hard limit ($2.00) on May 24. Increase the limit, switch to a cheaper model, or wait for the May 31 reset.</span>
+        </div>
+        <button style="background:transparent; border:1px solid var(--color-orange); color:var(--color-orange); padding:5px 10px; border-radius:5px; cursor:pointer; font-size:11.5px; align-self:center; white-space:nowrap;">
+          Raise limit
+        </button>
+      </div>
+
+      <div class="usage-summary">
+        <div class="usage-card">
+          <div class="label">This month</div>
+          <div class="value">66.4k</div>
+          <div class="sub">tokens · across all providers</div>
+        </div>
+        <div class="usage-card">
+          <div class="label">Estimated cost</div>
+          <div class="value" style="color:var(--color-orange)">$0.166</div>
+          <div class="sub">≈ 83% of $0.20 soft limit</div>
+        </div>
+        <div class="usage-card">
+          <div class="label">Pace</div>
+          <div class="value" style="color:var(--color-orange)">+$0.09</div>
+          <div class="sub">/ day · projects $2.78 by May 31</div>
+        </div>
+      </div>
+
+      <div class="usage-chart-wrap">
+        <div class="usage-chart-title">
+          <span>By provider — May 2026</span>
+          <select><option>This month</option></select>
+        </div>
+        <div class="usage-chart-bar">
+          <div class="seg deepseek" style="width:78%">DeepSeek 51.8k</div>
+          <div class="seg gemini"   style="width:18%">Gemini 14.6k</div>
+          <div class="seg remaining" style="width:4%"></div>
+        </div>
+        <div class="usage-legend">
+          <div class="item"><span class="swatch deepseek"></span>DeepSeek · 51.8k · $0.131</div>
+          <div class="item"><span class="swatch gemini"></span>Gemini · 14.6k · $0.035</div>
+          <div class="item"><span class="swatch remaining"></span>4% remaining</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<p class="footer-note">
+  Preview locally: <code>open design/mockups/settings-ai-providers.html</code><br />
+  Next mockup: <strong>Page 3 — Add Repo Wizard with adopt / reject / overwrite branch</strong>.
+</p>
+
+</body>
+</html>
