@@ -3,7 +3,7 @@
   "name": "Agentic Git Sync",
   "version": "1.0.0",
   "minAppVersion": "1.7.2",
-  "description": "Agentic two-way sync for your vault and submodules with GitHub — AI resolves conflicts and git errors autonomously.",
+  "description": "Agentic two-way sync for your vault and submodules with GitHub. AI resolves conflicts and git errors autonomously.",
   "author": "Jakob",
   "authorUrl": "https://github.com/leweii",
   "isDesktopOnly": true
