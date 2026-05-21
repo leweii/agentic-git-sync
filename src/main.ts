@@ -314,6 +314,63 @@ export default class GitHubSyncPlugin extends Plugin {
     this.dashboard?.refreshRepos();
   }
 
+  /**
+   * Apply an in-place edit to a submodule's configuration. Handles:
+   *   - Remote URL change → rewrites `.gitmodules` and the submodule's
+   *     own `remote.origin.url`.
+   *   - Branch change → seeds the new branch on the remote via the
+   *     GitHub Refs API (no-op if it already exists), so the next sync
+   *     can push/pull against it cleanly.
+   *   - `upstreamBranch` / `autoSync` → persisted only; no git op.
+   *
+   * Saves settings (which also writes `.github-sync.json`). Caller is
+   * expected to trigger a sync afterwards to materialize the changes
+   * (the EditSubmoduleModal does this for the user).
+   */
+  async updateSubmodule(
+    id: string,
+    changes: {
+      remoteUrl: string;
+      branch: string;
+      upstreamBranch?: string;
+      autoSync: boolean;
+    },
+  ): Promise<void> {
+    const idx = this.settings.submodules.findIndex((s) => s.id === id);
+    if (idx < 0) throw new Error("Submodule not found.");
+    const before = this.settings.submodules[idx];
+
+    // Git-level migration: remote URL change.
+    if (changes.remoteUrl !== before.remoteUrl) {
+      await this.submoduleManager.setRemoteUrl(before, changes.remoteUrl);
+    }
+
+    // Git-level migration: ensure the (possibly new) branch exists on
+    // the remote so subsequent sync ops have a destination ref.
+    if (changes.branch !== before.branch || changes.remoteUrl !== before.remoteUrl) {
+      try {
+        await ensureRemoteBranch(
+          changes.remoteUrl,
+          changes.branch,
+          this.settings.githubToken,
+        );
+      } catch (e) {
+        // Non-fatal — the next sync's recovery agent can still handle it.
+        console.warn("[agentic-git-sync] ensureRemoteBranch on update failed:", (e as Error).message);
+      }
+    }
+
+    this.settings.submodules[idx] = {
+      ...before,
+      remoteUrl: changes.remoteUrl,
+      branch: changes.branch,
+      upstreamBranch: changes.upstreamBranch,
+      autoSync: changes.autoSync,
+    };
+    await this.saveSettings();
+    this.dashboard?.refreshRepos();
+  }
+
   async removeSubmodule(id: string): Promise<void> {
     const sub = this.settings.submodules.find((s) => s.id === id);
     if (!sub) return;
@@ -331,6 +388,20 @@ export default class GitHubSyncPlugin extends Plugin {
       new Notice(`Couldn't remove ${sub.localPath}: ${(e as Error).message}`, 8000);
       throw e;
     }
+  }
+
+  /**
+   * Route a set of conflicts to the dashboard so the existing
+   * Resolve-button + ConflictModal flow takes over. Used by ad-hoc
+   * merge entry points (e.g., the manual "Pull from..." button) that
+   * don't go through the scheduler's emit pipeline.
+   */
+  surfaceConflict(repoId: string, conflicts: string[]): void {
+    this.dashboard?.onProgress(repoId, {
+      phase: "conflict",
+      message: `Merge conflict in ${conflicts.length} file(s). Click Resolve.`,
+      conflicts,
+    });
   }
 
   /** Surface any pre-existing merge conflicts so Resolve buttons appear without needing a manual sync. */

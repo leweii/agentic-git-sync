@@ -7,6 +7,7 @@ export class AddSubmoduleModal extends Modal {
   private localPath = "";
   private remoteUrl = "";
   private branch = "main";
+  private upstreamBranch = "";
   private remoteStatus: "idle" | "loading" | "valid" | "invalid" = "idle";
   private remoteMsg = "";
   private remoteIsEmpty = false;
@@ -79,6 +80,19 @@ export class AddSubmoduleModal extends Modal {
     const branchInput = branchWrap.createEl("input", { attr: { placeholder: "main" } });
     branchInput.value = "main";
     branchInput.oninput = () => (this.branch = branchInput.value.trim() || "main");
+
+    // ── Upstream branch (optional auto-merge source) ───────────
+    const upWrap = contentEl.createDiv("ghs-wizard-field");
+    upWrap.createEl("label", { text: "Upstream branch (optional)" });
+    const upHint = upWrap.createDiv("ghs-field-hint");
+    upHint.setText(
+      "Always merge in changes from this branch on every sync. " +
+      "Use it when you work on a personal branch but want to keep " +
+      "absorbing updates teammates push to the shared one (e.g. main)."
+    );
+    // eslint-disable-next-line obsidianmd/ui/sentence-case -- "main" is a branch name, not UI prose
+    const upInput = upWrap.createEl("input", { attr: { placeholder: "main (leave empty to disable)" } });
+    upInput.oninput = () => (this.upstreamBranch = upInput.value.trim());
 
     // ── Footer ─────────────────────────────────────────────────
     const footer = contentEl.createDiv("ghs-wizard-footer");
@@ -202,6 +216,12 @@ export class AddSubmoduleModal extends Modal {
       localPath: this.localPath,
       remoteUrl: this.remoteUrl,
       branch: this.branch,
+      // Persist only when set and different from the working branch —
+      // a no-op upstream config would just clutter the saved file.
+      upstreamBranch:
+        this.upstreamBranch && this.upstreamBranch !== this.branch
+          ? this.upstreamBranch
+          : undefined,
       autoSync: true,
       syncInterval: this.plugin.settings.autoSyncInterval,
     };

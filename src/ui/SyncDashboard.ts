@@ -4,6 +4,7 @@ import type { PendingChanges, SyncHistoryEntry, SyncPhase, SyncProgress } from "
 import { VAULT_REPO_ID } from "../types";
 import { AddSubmoduleModal } from "./AddSubmoduleModal";
 import { ConflictModal } from "./ConflictModal";
+import { PullFromBranchModal } from "./PullFromBranchModal";
 import { SyncPreviewModal } from "./SyncPreviewModal";
 import { timeAgo } from "./StatusBar";
 import { friendlyError } from "../errors";
@@ -213,8 +214,17 @@ export class SyncDashboard extends ItemView {
     setIcon(syncBtn, "refresh-cw");
     syncBtn.onclick = () => this.syncOne(state.id);
 
-    // Submodule cards get a remove button — main vault is removed via Settings.
+    // Submodule cards get a "Pull from..." button (merge a chosen
+    // branch into the current one) and a remove button — main vault is
+    // removed via Settings, and its branch ops belong in Settings too.
     if (state.id !== VAULT_REPO_ID) {
+      const pullBtn = actions.createEl("button", {
+        cls: "ghs-icon-btn",
+        attr: { title: `Pull from another branch into ${state.label}` },
+      });
+      setIcon(pullBtn, "git-pull-request");
+      pullBtn.onclick = () => this.openPullFromBranch(state.id);
+
       const removeBtn = actions.createEl("button", {
         cls: "ghs-icon-btn",
         attr: { title: `Remove ${state.label}` },
@@ -406,6 +416,15 @@ export class SyncDashboard extends ItemView {
     } catch (e) {
       new Notice(`Preview failed: ${(e as Error).message}`);
     }
+  }
+
+  private openPullFromBranch(id: string): void {
+    const sub = this.plugin.settings.submodules.find((s) => s.id === id);
+    if (!sub) {
+      new Notice("Couldn't find submodule.");
+      return;
+    }
+    new PullFromBranchModal(this.app, this.plugin, sub).open();
   }
 
   private openConflict(id: string): void {

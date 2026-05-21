@@ -13,6 +13,8 @@ export interface RepoConfigSubmoduleV1 {
   path: string;
   remote: string;
   branch: string;
+  /** Optional always-merge-in source branch. See SubmoduleConfig.upstreamBranch. */
+  upstreamBranch?: string;
 }
 
 export interface RepoConfigV1 {
@@ -79,6 +81,9 @@ export function parseRepoConfig(raw: unknown): RepoConfigV1 | null {
             path: typeof ss.path === "string" ? ss.path : "",
             remote: typeof ss.remote === "string" ? ss.remote : "",
             branch: typeof ss.branch === "string" ? ss.branch : "main",
+            upstreamBranch: typeof ss.upstreamBranch === "string" && ss.upstreamBranch
+              ? ss.upstreamBranch
+              : undefined,
           };
         }).filter((s) => s.path && s.remote)
       : [],
@@ -117,6 +122,7 @@ export function settingsToRepoConfig(s: GitHubSyncSettings): RepoConfigV1 {
       path: sub.localPath,
       remote: sub.remoteUrl,
       branch: sub.branch,
+      ...(sub.upstreamBranch ? { upstreamBranch: sub.upstreamBranch } : {}),
     })),
   };
 }
@@ -159,6 +165,7 @@ export function applyRepoConfig(
       localPath: c.path,
       remoteUrl: c.remote,
       branch: c.branch,
+      upstreamBranch: c.upstreamBranch,
       autoSync: existing?.autoSync ?? true,
       syncInterval: existing?.syncInterval ?? cfg.sync.autoIntervalMin,
     };

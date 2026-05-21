@@ -1,10 +1,11 @@
-import { App, Notice, PluginSettingTab, Setting, requestUrl, setIcon } from "obsidian";
+import { App, Modal, Notice, PluginSettingTab, Setting, requestUrl, setIcon } from "obsidian";
 import type GitHubSyncPlugin from "./main";
 import type { SyncHistoryEntry } from "./types";
 import { L, setLang, tf, type Lang } from "./i18n";
 import { isValidGitHubUrl } from "./git/SubmoduleManager";
 import { checkRepoAccess, type GitHubUser } from "./git/githubApi";
 import { AIProviderSetupModal } from "./ui/AIProviderSetupModal";
+import { EditSubmoduleModal } from "./ui/EditSubmoduleModal";
 import { SetupWizard } from "./ui/SetupWizard";
 
 export interface SubmoduleConfig {
@@ -12,6 +13,15 @@ export interface SubmoduleConfig {
   localPath: string;
   remoteUrl: string;
   branch: string;
+  /**
+   * Optional "always merge in" source branch. When set and different
+   * from `branch`, every sync fetches `origin/<upstreamBranch>` and
+   * merges it into the working branch before pushing. Lets a team
+   * member working on `jakob-edits` automatically pick up changes
+   * teammates pushed to `main`. Conflicts surface via the normal
+   * ConflictModal flow.
+   */
+  upstreamBranch?: string;
   autoSync: boolean;
   syncInterval: number;
 }
@@ -190,12 +200,12 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
 
   private renderRepository(parent: HTMLElement): void {
     const t = L().settings;
-    this.sectionHeader(parent, t.sectionRepo);
+    const card = this.sectionHeader(parent, t.sectionRepo);
 
     // Prominent wizard launcher. The wizard used to auto-pop on every
     // load; now it's strictly opt-in and lives here so users who want
     // it can always find it.
-    new Setting(parent)
+    new Setting(card)
       .setName(t.runSetupWizard)
       .setDesc(t.runSetupWizardDesc)
       .addButton((b) =>
@@ -213,7 +223,7 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
     const isValidUrl = (u: string) => isValidGitHubUrl(u.trim());
 
     // Editable URL field.
-    new Setting(parent)
+    new Setting(card)
       .setName(t.repoUrlLabel)
       .setDesc(t.repoUrlDesc)
       .addText((tx) => {
@@ -227,7 +237,7 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
       });
 
     // Editable branch field.
-    new Setting(parent)
+    new Setting(card)
       .setName(t.repoBranchLabel)
       .addText((tx) => {
         branchInputEl = tx.inputEl;
@@ -239,7 +249,7 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
       });
 
     // Auto-sync interval (editable inline, replaces the old "Reconfigure" button).
-    new Setting(parent)
+    new Setting(card)
       .setName(s.autoSyncInterval > 0
         ? tf(t.autoSyncEvery, s.autoSyncInterval)
         : t.autoSyncDisabled)
@@ -256,7 +266,7 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
       );
 
     // Connect / Save & sync button.
-    new Setting(parent)
+    new Setting(card)
       .setName("")
       .addButton((b) => {
         const initial = s.mainRepoUrl ? t.repoSaveAndSync : t.repoInitialize;
@@ -282,21 +292,64 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
           }
         });
       });
-    parent.appendChild(statusEl);
+    card.appendChild(statusEl);
 
-    // Submodules list (read-only — managed in the dashboard).
+    // Submodules list — its own card, separate from the connected-repo card.
     if (s.submodules.length > 0) {
-      new Setting(parent)
-        .setName(t.repoSubmodules)
-        .setDesc(`${s.submodules.length}`)
-        .setHeading();
+      const subsCard = this.sectionHeader(parent, t.repoSubmodules, { count: s.submodules.length });
       for (const sub of s.submodules) {
-        new Setting(parent)
+        const desc = sub.upstreamBranch
+          ? `${sub.remoteUrl} · ${sub.branch} ← ${sub.upstreamBranch}`
+          : `${sub.remoteUrl} · ${sub.branch}`;
+        new Setting(subsCard)
           .setName(sub.localPath)
-          .setDesc(`${sub.remoteUrl} · ${sub.branch}`)
-          .setClass("ghs-readonly-setting");
+          .setDesc(desc)
+          .addExtraButton((b) =>
+            b.setIcon("pencil")
+              .setTooltip("Edit submodule")
+              .onClick(() => {
+                new EditSubmoduleModal(this.app, this.plugin, sub).open();
+              })
+          )
+          .addExtraButton((b) =>
+            b.setIcon("trash-2")
+              .setTooltip("Remove submodule")
+              .onClick(() => this.confirmRemoveSubmodule(sub.id, sub.localPath))
+          );
       }
     }
+  }
+
+  private confirmRemoveSubmodule(id: string, label: string): void {
+    const modal = new (class extends Modal {
+      constructor(app: App, private onConfirm: () => Promise<void>) { super(app); }
+      onOpen(): void {
+        const { contentEl } = this;
+        contentEl.createEl("h3", { text: `Remove submodule "${label}"?` });
+        contentEl.createEl("p", {
+          text:
+            "This deinitialises the submodule and deletes its working tree from the vault. " +
+            "The remote repository on GitHub is not touched.",
+          cls: "ghs-confirm-desc",
+        });
+        const actions = contentEl.createDiv("ghs-confirm-actions");
+        const cancel = actions.createEl("button", { text: "Cancel" });
+        cancel.onclick = () => this.close();
+        const confirm = actions.createEl("button", { text: "Remove", cls: "mod-warning" });
+        confirm.onclick = async () => {
+          confirm.setAttribute("disabled", "true");
+          try {
+            await this.onConfirm();
+            this.close();
+          } catch { /* notice surfaced by removeSubmodule */ }
+        };
+      }
+      onClose(): void { this.contentEl.empty(); }
+    })(this.app, async () => {
+      await this.plugin.removeSubmodule(id);
+      this.display();
+    });
+    modal.open();
   }
 
   private showRepoStatus(badge: HTMLElement, kind: "loading" | "valid" | "invalid", text: string): void {
@@ -315,13 +368,13 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
 
   private renderAccount(parent: HTMLElement): void {
     const t = L().settings;
-    this.sectionHeader(parent, t.sectionAccount);
+    const card = this.sectionHeader(parent, t.sectionAccount);
 
     let tokenInputEl: HTMLInputElement | null = null;
     const testBadge = createDiv("ghs-inline-badge ghs-test-badge");
     testBadge.addClass("ghs-hidden");
 
-    new Setting(parent)
+    new Setting(card)
       .setName(t.tokenLabel)
       .addExtraButton((b) =>
         b.setIcon("help-circle").setTooltip(t.tokenHelp).onClick(() => {
@@ -349,9 +402,9 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
       .addButton((b) =>
         b.setButtonText(L().common.test).onClick(() => this.testConnection(testBadge))
       );
-    parent.appendChild(testBadge);
+    card.appendChild(testBadge);
 
-    new Setting(parent)
+    new Setting(card)
       .setName(t.nameLabel)
       .addText((text) =>
         text
@@ -364,7 +417,7 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(parent)
+    new Setting(card)
       .setName(t.emailLabel)
       .addText((text) =>
         text
@@ -382,10 +435,10 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
 
   private renderAI(parent: HTMLElement): void {
     const t = L().settings;
-    this.sectionHeader(parent, t.sectionAI);
+    const card = this.sectionHeader(parent, t.sectionAI);
 
     let dsInputEl: HTMLInputElement | null = null;
-    new Setting(parent)
+    new Setting(card)
       .setName(t.deepseekLabel)
       .addExtraButton((b) =>
         b.setIcon("eye").setTooltip(t.tokenShowHide).onClick(() => {
@@ -407,7 +460,7 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
       });
 
     let gmInputEl: HTMLInputElement | null = null;
-    new Setting(parent)
+    new Setting(card)
       .setName(t.geminiLabel)
       .addExtraButton((b) =>
         b.setIcon("eye").setTooltip(t.tokenShowHide).onClick(() => {
@@ -433,9 +486,9 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
 
   private renderGeneral(parent: HTMLElement): void {
     const t = L().settings;
-    this.sectionHeader(parent, t.sectionGeneral);
+    const card = this.sectionHeader(parent, t.sectionGeneral);
 
-    new Setting(parent)
+    new Setting(card)
       .setName(t.sectionLanguage)
       .addDropdown((dd) =>
         dd
@@ -450,7 +503,7 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(parent)
+    new Setting(card)
       .setName(t.clearHistory)
       .addButton((b) =>
         b.setButtonText(L().common.clear).setWarning().onClick(async () => {
@@ -463,9 +516,31 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
 
   // ── Helpers ──────────────────────────────────────────────────
 
-  private sectionHeader(parent: HTMLElement, title: string, desc?: string): void {
-    const setting = new Setting(parent).setName(title).setHeading();
-    if (desc) setting.setDesc(desc);
+  /**
+   * Render a section heading and return the card container that
+   * holds the section's items. Callers add their Setting() rows
+   * (and any inline status elements) to the returned card rather
+   * than to `parent`, so each section visually renders as a
+   * single rounded-bordered block — separator-by-spacing rather
+   * than separator-by-rule. See `.ghs-card` in styles.css.
+   *
+   * Pass `count` to append a muted parenthesised count after the
+   * title (e.g., "Submodules (2)") — used where a section has a
+   * variable number of items worth surfacing at a glance.
+   */
+  private sectionHeader(
+    parent: HTMLElement,
+    title: string,
+    opts?: { desc?: string; count?: number },
+  ): HTMLElement {
+    const setting = new Setting(parent).setHeading();
+    setting.nameEl.empty();
+    setting.nameEl.createSpan({ text: title });
+    if (opts?.count !== undefined) {
+      setting.nameEl.createSpan({ cls: "ghs-section-count", text: `(${opts.count})` });
+    }
+    if (opts?.desc) setting.setDesc(opts.desc);
+    return parent.createDiv("ghs-card");
   }
 
   private async testConnection(container: HTMLElement): Promise<void> {

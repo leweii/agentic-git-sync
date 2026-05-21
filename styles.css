@@ -1712,6 +1712,84 @@
   line-height: 1.45;
 }
 
+/* ── Card-grouped sections ──────────────────────────────────────
+ *
+ * Mirror Obsidian's own Settings layout: each section title sits
+ * unstyled above the card, and the related items below are grouped
+ * inside a single rounded-border card. Inside a card, subtle 1px
+ * dividers separate adjacent items. Inter-section separation is just
+ * vertical spacing between cards — no horizontal rules. Dividers are
+ * used sparingly: only inside cards, only between items.
+ *
+ * The section title is rendered via Obsidian's `setHeading()` (which
+ * adds `setting-item-heading`), and the card container is a div with
+ * class `ghs-card` placed immediately after by `sectionHeader()` in
+ * settings.ts. */
+
+.ghs-settings .setting-item-heading {
+  background: transparent;
+  border: none;
+  padding: 22px 2px 8px;
+  margin: 0;
+}
+.ghs-settings .setting-item-heading:first-of-type,
+.ghs-settings .ghs-silent-hero + .setting-item-heading,
+.ghs-settings .ghs-quick-start + .setting-item-heading {
+  padding-top: 8px;
+}
+.ghs-settings .setting-item-heading .setting-item-name {
+  font-size: 1.05em;
+  font-weight: 600;
+  color: var(--text-normal);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.ghs-settings .setting-item-heading .setting-item-description {
+  margin-top: 2px;
+  color: var(--text-muted);
+}
+/* Muted count appended to a section title, e.g. "Submodules (2)". */
+.ghs-settings .ghs-section-count {
+  font-size: 0.82em;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+/* The card. Holds all settings + inline status badges for one section.
+ * Background is the page's secondary surface so it visually lifts from
+ * the surrounding canvas; border is the standard modifier line. */
+.ghs-settings .ghs-card {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+/* Inside a card, each Setting row keeps its padding but loses any
+ * background it inherited from the .ghs-settings .setting-item rule
+ * above (the card already provides that). Subtle 1px divider between
+ * rows — applied via top border on each row except the first. */
+.ghs-settings .ghs-card .setting-item {
+  background: transparent;
+  padding: 14px 16px;
+  margin: 0;
+  border: none;
+}
+.ghs-settings .ghs-card .setting-item + .setting-item {
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Inline status badges that callers append inside a card (e.g., the
+ * "Connected" / "Couldn't connect" repo status, the Test-connection
+ * diagnostic) sit flush with the card's padding rules so they don't
+ * leak the card background. */
+.ghs-settings .ghs-card .ghs-inline-badge:not(.ghs-hidden),
+.ghs-settings .ghs-card .ghs-diag-container:not(.ghs-hidden) {
+  margin: 0 16px 14px;
+}
+
 .ghs-settings .setting-item-description {
   font-size: 0.82em;
   color: var(--text-muted);
@@ -2304,4 +2382,291 @@
 /* Token input gets a comfortable minimum width */
 .ghs-token-input {
   min-width: 320px;
+}
+
+/* ── Pull-from-branch modal ─────────────────────────────────── */
+
+.ghs-pb-modal {
+  padding: 0;
+}
+
+.ghs-pb-modal .modal-content {
+  padding: 0;
+}
+
+.ghs-pb-header {
+  padding: 20px 24px 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ghs-pb-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.ghs-pb-title-row h3 {
+  margin: 0;
+  font-size: 1.05em;
+}
+
+.ghs-pb-title-icon {
+  display: flex;
+  color: var(--color-accent);
+}
+
+.ghs-pb-title-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.ghs-pb-subtitle {
+  margin: 0;
+  font-size: 0.85em;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.ghs-pb-list {
+  overflow-y: auto;
+  max-height: 340px;
+  padding: 6px 0;
+}
+
+.ghs-pb-loading,
+.ghs-pb-empty,
+.ghs-pb-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 24px;
+  font-size: 0.9em;
+  color: var(--text-muted);
+}
+
+.ghs-pb-loading svg {
+  width: 14px;
+  height: 14px;
+  animation: ghs-spin 1.2s linear infinite;
+}
+
+.ghs-pb-error {
+  color: var(--color-red);
+}
+
+.ghs-pb-error svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ghs-pb-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 24px;
+  cursor: pointer;
+  transition: background 80ms;
+}
+
+.ghs-pb-row:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ghs-pb-row.is-selected {
+  background: var(--background-modifier-hover);
+}
+
+.ghs-pb-radio {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.ghs-pb-branch-icon {
+  display: flex;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.ghs-pb-branch-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ghs-pb-branch-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ghs-pb-branch-name {
+  font-family: var(--font-monospace);
+  font-size: 0.9em;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ghs-pb-default-tag {
+  font-size: 0.72em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+  padding: 2px 7px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.ghs-pb-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px;
+  font-size: 0.86em;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.ghs-pb-status svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.ghs-pb-status.loading { color: var(--text-muted); }
+.ghs-pb-status.loading svg { animation: ghs-spin 1.2s linear infinite; }
+.ghs-pb-status.success { color: var(--color-green); }
+.ghs-pb-status.error   { color: var(--color-red); }
+
+.ghs-pb-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.ghs-pb-cancel-btn {
+  padding: 6px 14px;
+}
+
+.ghs-pb-confirm-btn {
+  padding: 6px 16px;
+  font-weight: 600;
+}
+
+.ghs-pb-confirm-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── Edit-submodule modal ───────────────────────────────────── */
+
+.ghs-es-modal { padding: 0; }
+.ghs-es-modal .modal-content { padding: 0; }
+
+.ghs-es-header {
+  padding: 20px 24px 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.ghs-es-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.ghs-es-title-row h3 { margin: 0; font-size: 1.05em; }
+.ghs-es-title-icon { display: flex; color: var(--color-accent); }
+.ghs-es-title-icon svg { width: 18px; height: 18px; }
+.ghs-es-subtitle {
+  margin: 0;
+  font-size: 0.85em;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.ghs-es-body {
+  padding: 14px 24px 8px;
+}
+.ghs-es-field {
+  margin-bottom: 14px;
+}
+.ghs-es-field > label {
+  display: block;
+  font-size: 0.88em;
+  font-weight: 500;
+  margin-bottom: 6px;
+  color: var(--text-normal);
+}
+.ghs-es-field input[type="text"] {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 0.9em;
+}
+.ghs-es-field input[type="text"]:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+.ghs-es-field input[type="checkbox"] {
+  margin: 4px 0;
+}
+.ghs-es-readonly {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.ghs-es-hint {
+  margin-top: 4px;
+  font-size: 0.78em;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.ghs-es-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px;
+  font-size: 0.86em;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+.ghs-es-status svg { width: 14px; height: 14px; flex-shrink: 0; }
+.ghs-es-status.loading { color: var(--text-muted); }
+.ghs-es-status.loading svg { animation: ghs-spin 1.2s linear infinite; }
+.ghs-es-status.success { color: var(--color-green); }
+.ghs-es-status.error   { color: var(--color-red); }
+
+.ghs-es-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.ghs-es-cancel-btn { padding: 6px 14px; }
+.ghs-es-save-btn { padding: 6px 16px; font-weight: 600; }
+.ghs-es-save-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ── Generic confirm dialog (used for submodule removal) ───── */
+
+.ghs-confirm-desc {
+  font-size: 0.88em;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 8px 0 18px;
+}
+.ghs-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }

@@ -17,6 +17,14 @@ export type ProgressFn = (p: SyncProgress) => void;
 
 export interface SyncOptions {
   branch?: string;
+  /**
+   * Optional second branch to merge into `branch` before pushing. When
+   * set and different from `branch`, _doSync fetches origin/<this> and
+   * merges it into the working branch. Lets a feature branch
+   * automatically absorb changes that landed on the team's `main`.
+   * Conflicts surface via GitConflictError just like pull conflicts.
+   */
+  upstreamBranch?: string;
   message?: string;
   ignorePatterns?: string[];
   onProgress?: ProgressFn;
@@ -635,11 +643,96 @@ export class GitManager {
     // Pull remote changes (handles unrelated histories + auto-resolves system files).
     await this.pull(branch, opts.onProgress);
 
+    // Optionally merge in an "upstream" branch — used for the submodule
+    // workflow where a feature branch wants to absorb changes that have
+    // landed on the team's main branch. We do this BEFORE staging
+    // auto-resolved files so any merge conflicts can be auto-resolved
+    // alongside the pull-time conflicts in the same commit.
+    if (opts.upstreamBranch && opts.upstreamBranch !== branch) {
+      await this.mergeFromBranch(opts.upstreamBranch, opts.onProgress);
+    }
+
     // Commit any auto-resolved merge files, then push everything.
     await this.stageAndCommit(opts.message, ignore, opts.onProgress);
     opts.onProgress?.({ phase: "pushing", message: `Pushing to origin/${branch}` });
     await this.runWithRetry(["push", "--set-upstream", "origin", branch], 3, opts.onProgress);
     return 1;
+  }
+
+  /**
+   * Fetch `origin/<sourceBranch>` and merge it into the currently
+   * checked-out branch. Auto-resolves the system files we always know
+   * how to handle; throws GitConflictError for genuine user-content
+   * conflicts so the caller can route to the ConflictModal.
+   *
+   * Does not push — the caller decides when to push (sync pipelines do
+   * it as their last step; the manual "Pull from..." button pushes
+   * directly after).
+   *
+   * Safe to call even if `sourceBranch` is the same as the current
+   * branch: returns 0 without doing anything.
+   */
+  async mergeFromBranch(sourceBranch: string, onProgress?: ProgressFn): Promise<number> {
+    await this.ready;
+    const current = await this.git.revparse(["--abbrev-ref", "HEAD"]).then((s) => s.trim()).catch(() => "");
+    if (!sourceBranch || sourceBranch === current) return 0;
+
+    onProgress?.({ phase: "pulling", message: `Merging origin/${sourceBranch}` });
+
+    try {
+      await this.git.fetch("origin", sourceBranch);
+    } catch (e) {
+      const msg = (e as Error).message ?? "";
+      if (/couldn't find remote ref|no such ref/i.test(msg)) {
+        // Upstream branch doesn't exist yet on the remote — nothing to merge.
+        return 0;
+      }
+      throw e;
+    }
+
+    try {
+      await this.git.raw([
+        "merge",
+        "--no-ff",
+        "--no-edit",
+        "-m", `chore: merge origin/${sourceBranch} into ${current || "current branch"}`,
+        `origin/${sourceBranch}`,
+      ]);
+    } catch (e) {
+      const msg = (e as Error).message ?? "";
+      if (!msg.includes("Automatic merge failed") && !msg.includes("CONFLICT") && !msg.includes("Already up to date")) {
+        throw e;
+      }
+      // Otherwise: conflicts on disk — handled below.
+    }
+
+    const conflicts = (await this.git.status()).conflicted;
+    const userConflicts = await this.autoResolveSystemFiles(conflicts);
+    if (userConflicts.length > 0) throw new GitConflictError(userConflicts);
+
+    // All conflicts auto-resolved — finalise the merge commit if needed.
+    if (this.isMidMerge()) {
+      await this.git.commit(`chore: merge origin/${sourceBranch} (auto-resolved system files)`);
+    }
+    return 1;
+  }
+
+  /**
+   * Public one-shot "merge then push" entry point used by the manual
+   * "Pull from..." dashboard action. Performs the merge in-process
+   * (delegating to mergeFromBranch) and then pushes the current branch
+   * upstream so the merged result lands remotely without waiting for
+   * the next regular sync.
+   */
+  async mergeAndPushFromBranch(
+    currentBranch: string,
+    sourceBranch: string,
+    onProgress?: ProgressFn
+  ): Promise<void> {
+    await this.ready;
+    await this.mergeFromBranch(sourceBranch, onProgress);
+    onProgress?.({ phase: "pushing", message: `Pushing to origin/${currentBranch}` });
+    await this.runWithRetry(["push", "--set-upstream", "origin", currentBranch], 3, onProgress);
   }
 }
 

@@ -184,6 +184,33 @@ export class SubmoduleManager {
     return this.getSubGM(config).stagePath(file);
   }
 
+  /**
+   * Repoint a submodule at a new remote URL. Updates both sides:
+   *   - Parent's `.gitmodules` (`submodule.<path>.url`)
+   *   - Submodule's own `remote.origin.url`
+   *
+   * Runs `git submodule sync` so any cached refspec inside `.git/config`
+   * picks up the new URL. Does not fetch or push — the caller's next
+   * sync handles that.
+   */
+  async setRemoteUrl(config: SubmoduleConfig, newUrl: string): Promise<void> {
+    // Parent .gitmodules — the source of truth for what URL fresh clones use.
+    await this.git.raw([
+      "config", "-f", ".gitmodules",
+      `submodule.${config.localPath}.url`, newUrl,
+    ]);
+    // Apply to existing .git/config of the submodule via `submodule sync`.
+    await this.git.raw(["submodule", "sync", "--", config.localPath]);
+    // Also set it directly inside the submodule, in case `submodule sync`
+    // skipped this entry (it sometimes does when the path looks odd).
+    const subGit = simpleGit(`${this.vaultPath}/${config.localPath}`);
+    await subGit.remote(["set-url", "origin", newUrl]).catch(() => { /* origin may have been remapped already */ });
+    // Drop the cached per-submodule GitManager — its `insteadOf` config
+    // was set up against the old URL; new one will be initialised on
+    // next access with the new URL in scope.
+    this.gitManagers.delete(config.id);
+  }
+
   async abortMerge(config: SubmoduleConfig): Promise<void> {
     return this.getSubGM(config).abortMerge();
   }
@@ -193,11 +220,32 @@ export class SubmoduleManager {
   async syncOne(config: SubmoduleConfig, onProgress?: ProgressFn): Promise<number> {
     const count = await this.getSubGM(config).sync({
       branch: config.branch,
+      upstreamBranch: config.upstreamBranch,
       remoteUrl: config.remoteUrl,
       onProgress,
     });
     await this.updateParentPointer(config);
     return count;
+  }
+
+  /**
+   * Manual one-shot: merge `sourceBranch` from the submodule's remote
+   * into its current working branch and push the result. Used by the
+   * dashboard's "Pull from..." action. Conflicts surface through the
+   * normal GitConflictError path so the caller can route to the
+   * ConflictModal.
+   */
+  async mergeFromBranch(
+    config: SubmoduleConfig,
+    sourceBranch: string,
+    onProgress?: ProgressFn
+  ): Promise<void> {
+    await this.getSubGM(config).mergeAndPushFromBranch(
+      config.branch,
+      sourceBranch,
+      onProgress
+    );
+    await this.updateParentPointer(config);
   }
 
   /** Commit staged conflict resolution and push — both submodule and parent pointer. */
