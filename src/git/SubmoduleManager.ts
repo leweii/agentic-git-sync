@@ -6,6 +6,12 @@ import { GitManager, GitConflictError } from "./GitManager";
 import type { ProgressFn } from "./GitManager";
 import { ensureRemoteBranch } from "./githubApi";
 
+// Direct `fs` use is bounded to: (a) the submodule's working-tree
+// directory under `<vault>/<localPath>`, and (b) the submodule's git
+// metadata under `<vault>/.git/modules/<localPath>/`. Both are inside
+// the user's vault and invisible to Obsidian's Vault API. Module load
+// is gated by `Platform.isDesktop` in `node-builtins.ts`.
+
 export class SubmoduleManager {
   private git: SimpleGit;
   private gitManagers = new Map<string, GitManager>();

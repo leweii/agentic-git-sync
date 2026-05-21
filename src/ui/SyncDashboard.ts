@@ -7,6 +7,7 @@ import { ConflictModal } from "./ConflictModal";
 import { SyncPreviewModal } from "./SyncPreviewModal";
 import { timeAgo } from "./StatusBar";
 import { friendlyError } from "../errors";
+import { L } from "../i18n";
 
 export const DASHBOARD_VIEW_TYPE = "github-sync-dashboard";
 
@@ -230,10 +231,22 @@ export class SyncDashboard extends ItemView {
     setIcon(errorIcon, "alert-circle");
     const errorText = errorRow.createSpan({ cls: "ghs-error-text" });
     const errorActions = errorRow.createDiv("ghs-error-actions");
-    const copyBtn = errorActions.createEl("button", { text: "Copy", attr: { title: "Copy error" } });
+    // "Select" rather than "Copy" — we never write to the system
+    // clipboard ourselves. Clicking highlights the error text in the
+    // user's own selection so they can press the platform copy shortcut
+    // and the OS handles the clipboard write. Avoids the
+    // navigator.clipboard.writeText permission entirely.
+    const copyBtn = errorActions.createEl("button", {
+      text: L().dashboard.selectError,
+      attr: { title: L().dashboard.selectErrorTooltip },
+    });
     copyBtn.onclick = () => {
-      const msg = this.cards.get(state.id)?.state.errorMsg ?? "";
-      void navigator.clipboard.writeText(msg).then(() => new Notice("Error copied"));
+      const range = document.createRange();
+      range.selectNodeContents(errorText);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+      new Notice(L().dashboard.errorSelected);
     };
     const resolveBtn = errorActions.createEl("button", { text: "Resolve", cls: "ghs-resolve-btn" });
     resolveBtn.onclick = () => this.openConflict(state.id);

@@ -4,6 +4,15 @@ import type { PendingChanges, SyncProgress } from "../types";
 import type { AIProvider } from "../ai/AIProvider";
 import { GitErrorAgent } from "./GitErrorAgent";
 
+// Direct `fs` use in this file is intentional and unavoidable. Every
+// path passed to `fs` is rooted at `this.vaultPath` and addresses either
+// (a) a file inside the user's vault that git tracks (e.g., a reverted
+// working-tree file, the toplevel `.gitignore`), or (b) something under
+// `<vault>/.git/` that Obsidian's Vault API does not expose at all
+// (the index lock, MERGE_HEAD, the submodule gitfile that resolves the
+// real gitdir). Module resolution is gated by `Platform.isDesktop` in
+// `node-builtins.ts`.
+
 export type ProgressFn = (p: SyncProgress) => void;
 
 export interface SyncOptions {

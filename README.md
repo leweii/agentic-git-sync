@@ -56,6 +56,19 @@ The setup wizard appears from Settings → Agentic Git Sync → Run setup wizard
 
 **Secrets never leave your device.** The plugin's own `.gitignore` excludes `.obsidian/`, and `.github-sync.json`'s schema has no token fields at all — there's no path by which the plugin can leak credentials into a commit.
 
+## Security & permissions
+
+The plugin is `isDesktopOnly: true` and uses a few APIs that the Obsidian community-plugin scanner flags. Each is justified by what a git plugin fundamentally has to do; what each one is and isn't, in plain terms:
+
+| API | What we do with it | What we don't do |
+|---|---|---|
+| **Node `fs` (read/write outside vault API)** | Read and write files inside `<vault>/.git/` (lock files like `index.lock` / `MERGE_HEAD`, `.gitmodules`, the submodule's `.git` gitfile) and toplevel git-managed files (`.gitignore`). Obsidian's `Vault` API doesn't expose dotfiles or `.git/`, so we can't reach them through it. | Read or write anywhere outside the user's vault root. Every path passed to `fs` is constructed from the vault path and a git-known sub-path. Access is gated by `Platform.isDesktop`. |
+| **`child_process` (shell execution)** | Not used directly. Pulled in transitively by [`simple-git`](https://github.com/steveukx/git-js), which invokes the system `git` binary to run actual git operations (pull, push, commit, merge). This is the only way to use git from a Node plugin. | Spawn anything besides git, or pass user-controlled strings as commands. `simple-git` passes arguments as a fixed argv array, not through a shell. |
+| **Clipboard** | One write of the plugin's own error string when you click the "Copy" button next to a failed sync, so you can paste it into an issue or chat. *(Removed in v1.1.1+: replaced with an inline selectable error text element so no clipboard write happens at all.)* | Read the clipboard. Touch any vault content. |
+| **Network** | HTTPS requests to `github.com` / `api.github.com` to do git fetch/push, check repo access, and (if you've configured one) the AI provider you chose (DeepSeek or Gemini) for conflict resolution. | Send anything anywhere else. AI requests only fire when smart-sync is on AND a key is configured; you can disable file-path or surrounding-context sharing in Settings → AI. |
+
+The token you paste in Settings is stored in `<vault>/.obsidian/plugins/agentic-git-sync/data.json` — local only, never written into any committed file. The plugin's `.github-sync.json` (the shared, committed config) has no token field at all.
+
 ## Troubleshooting
 
 **`Permission denied` or `403` on push.** Open Settings → Agentic Git Sync → **Test connection**. The third row (`git auth`) exercises the same credential path your sync uses. If that row fails while the API rows pass, your local git is using stale credentials (most commonly the macOS Keychain) — erase the cached entry or rotate the token.

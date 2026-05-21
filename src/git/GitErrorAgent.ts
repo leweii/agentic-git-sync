@@ -21,6 +21,16 @@ import {
   type ErrorRecoveryPlan,
 } from "../ai/gitErrorPrompt";
 
+// Direct `fs` use here is confined to `<vault>/.git/` recovery actions:
+// deleting stale lock files (index.lock, HEAD.lock, refs/**.lock), the
+// MERGE_HEAD / CHERRY_PICK_HEAD markers from interrupted operations,
+// and the corrupt-index file when git asks for a rebuild. Plus reading
+// the submodule gitfile to resolve the real gitdir, and reading/
+// appending `<vault>/.gitignore` for skip_large_file. None of these
+// paths leave `vaultPath`, and none are reachable through Obsidian's
+// Vault API. Module load is gated by `Platform.isDesktop` in
+// `node-builtins.ts`.
+
 // ─── Recovery context ────────────────────────────────────────────────────────
 
 interface RecoveryContext {
