@@ -220,3 +220,99 @@ export async function ensureRemoteHasCommits(
     throw new Error(`Couldn't initialize empty repository (HTTP ${res.status}).`);
   }
 }
+
+interface GitHubRefObject { object?: { sha?: string } }
+interface GitHubRepoMeta { default_branch?: string }
+
+/**
+ * If `branch` doesn't exist on the remote yet, create it from the repo's
+ * default branch via the GitHub Git Refs API. Returns whether the branch
+ * was newly created and the default branch it was based on.
+ *
+ * No-op for non-github URLs or when no token is provided — git's
+ * `push --set-upstream` already handles the simple "branch doesn't exist
+ * yet" case. The API path is what unlocks the protected-default-branch
+ * scenario: when the user can't push to main, they pick a new branch
+ * name, and we materialise it on the remote from main's tip so the
+ * subsequent push has a destination ref to land on.
+ */
+export async function ensureRemoteBranch(
+  remoteUrl: string,
+  branch: string,
+  token: string,
+): Promise<{ created: boolean; defaultBranch: string | null }> {
+  if (!token) return { created: false, defaultBranch: null };
+  const parsed = parseOwnerRepo(remoteUrl);
+  if (!parsed) return { created: false, defaultBranch: null };
+  const { owner, repo } = parsed;
+  const headers = {
+    Authorization: `token ${token}`,
+    "User-Agent": "ObsidianGitHubSync",
+  };
+
+  const branchProbe = await requestUrl({
+    url: `https://api.github.com/repos/${owner}/${repo}/branches/${encodeURIComponent(branch)}`,
+    headers,
+    throw: false,
+  });
+  if (branchProbe.status === 200) return { created: false, defaultBranch: null };
+  if (branchProbe.status !== 404) {
+    // 401/403 → leave it to the git layer to surface the right error.
+    return { created: false, defaultBranch: null };
+  }
+
+  const repoMeta = await requestUrl({
+    url: `https://api.github.com/repos/${owner}/${repo}`,
+    headers,
+    throw: false,
+  });
+  const defaultBranch = (repoMeta.json as GitHubRepoMeta | null)?.default_branch ?? null;
+  if (repoMeta.status !== 200 || !defaultBranch) {
+    throw new Error(`Couldn't read repository default branch (HTTP ${repoMeta.status}).`);
+  }
+
+  const refRes = await requestUrl({
+    url: `https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(defaultBranch)}`,
+    headers,
+    throw: false,
+  });
+  const sha = (refRes.json as GitHubRefObject | null)?.object?.sha;
+  if (refRes.status !== 200 || !sha) {
+    throw new Error(`Couldn't read tip of ${defaultBranch} (HTTP ${refRes.status}).`);
+  }
+
+  const createRes = await requestUrl({
+    url: `https://api.github.com/repos/${owner}/${repo}/git/refs`,
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ ref: `refs/heads/${branch}`, sha }),
+    throw: false,
+  });
+  if (createRes.status !== 201 && createRes.status !== 200) {
+    const apiMsg = (createRes.json as GitHubErrorBody | null)?.message;
+    throw new Error(
+      `Couldn't create branch ${branch} (HTTP ${createRes.status}${apiMsg ? `: ${apiMsg}` : ""}).`
+    );
+  }
+  return { created: true, defaultBranch };
+}
+
+/**
+ * True when a git push failure looks like a *permission* issue on the
+ * target branch — typically pushing to a protected default branch
+ * without a PR, or pushing to a repo you can read but not write.
+ *
+ * Used to distinguish "switch branches" cases from generic auth or
+ * network failures, which need different remediation.
+ */
+export function isPushPermissionError(msg: string): boolean {
+  if (!msg) return false;
+  const m = msg.toLowerCase();
+  if (m.includes("publickey")) return false;
+  if (m.includes("gh006")) return true;
+  if (m.includes("protected branch")) return true;
+  if (m.includes("hook declined")) return true;
+  if (m.includes("permission") && m.includes("denied")) return true;
+  if (m.includes("remote rejected") && (m.includes("protected") || m.includes("declined") || m.includes("permission"))) return true;
+  return false;
+}

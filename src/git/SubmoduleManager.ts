@@ -4,6 +4,7 @@ import type { SubmoduleConfig } from "../settings";
 import type { PendingChanges, SyncProgress } from "../types";
 import { GitManager, GitConflictError } from "./GitManager";
 import type { ProgressFn } from "./GitManager";
+import { ensureRemoteBranch } from "./githubApi";
 
 export class SubmoduleManager {
   private git: SimpleGit;
@@ -24,6 +25,71 @@ export class SubmoduleManager {
   async add(config: SubmoduleConfig): Promise<void> {
     await this.git.submoduleAdd(config.remoteUrl, config.localPath);
     await this.git.submoduleUpdate(["--init", config.localPath]);
+    await this.alignSubmoduleToBranch(config);
+  }
+
+  /**
+   * Bring the freshly-cloned submodule onto the requested branch.
+   *
+   * `git submodule add <url> <path>` always checks out the remote's
+   * default branch — it doesn't read `config.branch`. So when the user
+   * asks for a non-default branch (existing or not), the submodule's
+   * local HEAD diverges from what later syncs try to push, producing
+   * "src refspec <branch> does not match any" on first push.
+   *
+   * This method makes the two sides match:
+   *   1. Create the branch on the remote via the GitHub Git Refs API
+   *      if it doesn't exist yet (based on the repo's default branch).
+   *   2. Locally check out (or create) that branch and push --set-upstream.
+   *   3. Record `submodule.<path>.branch` in .gitmodules so other clones
+   *      (`git submodule update --remote`) track the right branch too.
+   *
+   * All steps are best-effort: a failure here doesn't unwind the add,
+   * since the submodule is already registered and the next sync's
+   * recovery agent can finish the alignment.
+   */
+  private async alignSubmoduleToBranch(config: SubmoduleConfig): Promise<void> {
+    const subPath = `${this.vaultPath}/${config.localPath}`;
+    const subGit = simpleGit(subPath);
+    const current = await subGit.revparse(["--abbrev-ref", "HEAD"]).then((s) => s.trim()).catch(() => "");
+    if (!current || current === config.branch) {
+      await this.recordSubmoduleBranch(config).catch(() => {});
+      return;
+    }
+
+    if (this.token) {
+      try {
+        await ensureRemoteBranch(config.remoteUrl, config.branch, this.token);
+      } catch (e) {
+        console.warn("[agentic-git-sync] ensureRemoteBranch (submodule) failed:", (e as Error).message);
+      }
+    }
+
+    // Try to track the (now-)existing remote branch; fall back to
+    // creating a fresh local branch off the current HEAD.
+    const checkedOut = await subGit
+      .raw(["checkout", "-B", config.branch, `origin/${config.branch}`])
+      .then(() => true)
+      .catch(() => false);
+    if (!checkedOut) {
+      await subGit.raw(["checkout", "-B", config.branch]).catch(() => {});
+    }
+    await subGit
+      .raw(["push", "--set-upstream", "origin", config.branch])
+      .catch((e) => {
+        console.warn("[agentic-git-sync] submodule branch push failed:", (e as Error).message);
+      });
+
+    await this.recordSubmoduleBranch(config).catch(() => {});
+  }
+
+  /** Record `submodule.<path>.branch = <branch>` in the parent's .gitmodules. */
+  private async recordSubmoduleBranch(config: SubmoduleConfig): Promise<void> {
+    await this.git.raw([
+      "config", "-f", ".gitmodules",
+      `submodule.${config.localPath}.branch`,
+      config.branch,
+    ]);
   }
 
   async remove(localPath: string): Promise<void> {
@@ -190,7 +256,18 @@ export class SubmoduleManager {
     return gm;
   }
 
-  /** Stage the updated submodule pointer in the parent vault and push. */
+  /**
+   * Stage the updated submodule pointer in the parent vault and commit it.
+   * Push attempts are *best-effort* and never thrown.
+   *
+   * If we re-threw on push failure here, a successful submodule sync
+   * would be reported to the user as a failure whenever the parent
+   * vault's remote rejects the push (typical case: the user can push
+   * to the submodule's repo but not to the main vault's repo). The
+   * commit stays in the parent's local history regardless, so the next
+   * vault sync will pick it up and surface that push failure where it
+   * actually belongs — under the vault, not the submodule.
+   */
   private async updateParentPointer(config: SubmoduleConfig): Promise<void> {
     await this.git.add(config.localPath);
     const status = await this.git.status();
@@ -198,7 +275,17 @@ export class SubmoduleManager {
     await this.git.commit(`chore: update submodule ${config.localPath}`);
     const branch = (await this.git.revparse(["--abbrev-ref", "HEAD"])).trim();
     if (branch && branch !== "HEAD") {
-      await this.git.raw(["push", "--set-upstream", "origin", branch]);
+      await this.git
+        .raw(["push", "--set-upstream", "origin", branch])
+        .catch((e) => {
+          console.warn(
+            "[agentic-git-sync] couldn't push parent pointer for submodule",
+            config.localPath,
+            "—",
+            (e as Error).message,
+            "(will retry on next vault sync)"
+          );
+        });
     }
   }
 }

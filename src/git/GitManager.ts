@@ -29,6 +29,19 @@ export class GitManager {
   private token: string;
   private configDir: string;
   private errorAgent: GitErrorAgent;
+  /**
+   * Resolves once configureGit() has finished writing the token-bearing
+   * `insteadOf` rule + HTTP tuning. Any method that actually talks to
+   * the remote (pull/push/fetch/ls-remote) must `await this.ready` first.
+   *
+   * Without this, the first user-initiated sync immediately after the
+   * GitManager is constructed races configureGit: the push fires before
+   * the credential rewrite lands in .git/config, the transport URL has
+   * no token, and GitHub returns 403 "Write access not granted." The
+   * next sync wins the race and succeeds — confusing but harmless once
+   * understood. Awaiting `ready` removes the race entirely.
+   */
+  private ready: Promise<void>;
 
   constructor(
     vaultPath: string,
@@ -45,7 +58,7 @@ export class GitManager {
     this.configDir = configDir;
     this.git = simpleGit(vaultPath);
     this.errorAgent = new GitErrorAgent(this.git, vaultPath, providers);
-    this.configureGit().catch(() => {});
+    this.ready = this.configureGit().catch(() => { /* configureGit is best-effort */ });
   }
 
   private async configureGit() {
@@ -256,6 +269,7 @@ export class GitManager {
   }
 
   async pull(branch = "main", onProgress?: ProgressFn): Promise<void> {
+    await this.ready;
     onProgress?.({ phase: "pulling", message: `Pulling origin/${branch}` });
     try {
       await this.git.pull("origin", branch, { "--rebase": "false" });
@@ -344,6 +358,7 @@ export class GitManager {
     ignore: string[] = [],
     onProgress?: ProgressFn
   ): Promise<number> {
+    await this.ready;
     const committed = await this.stageAndCommit(message, ignore, onProgress);
     if (committed === 0) return 0;
     onProgress?.({ phase: "pushing", message: `Pushing to origin/${branch}` });
@@ -357,6 +372,7 @@ export class GitManager {
     message: string,
     onProgress?: ProgressFn
   ): Promise<number> {
+    await this.ready;
     const status = await this.git.status();
     const stagedCount = status.staged.length;
     onProgress?.({ phase: "committing", message: "Committing merge" });
@@ -451,6 +467,7 @@ export class GitManager {
    * tokens that the API-level checks don't surface.
    */
   async testRemote(remoteUrl: string): Promise<{ ok: boolean; message?: string }> {
+    await this.ready;
     try {
       await this.git.raw(["ls-remote", "--exit-code", "--heads", remoteUrl]);
       return { ok: true };
@@ -510,6 +527,7 @@ export class GitManager {
    * to the ConflictModal for the user to resolve.
    */
   async sync(opts: SyncOptions & { remoteUrl?: string } = {}): Promise<number> {
+    await this.ready;
     const branch = opts.branch ?? "main";
     const MAX_RECOVERY_ATTEMPTS = 2;
 

@@ -198,8 +198,16 @@ function classifyByRules(error: string): ErrorRecoveryPlan {
   if (m.includes("non-fast-forward") || (m.includes("rejected") && m.includes("behind its remote"))) {
     return { tool: "reset_to_remote", params: {}, reasoning: "Local branch is behind remote", confidence: 4 };
   }
-  if (m.includes("src refspec") || m.includes("does not match any") || m.includes("no upstream branch") || m.includes("unborn branch")) {
-    return { tool: "push_set_upstream", params: {}, reasoning: "Remote branch does not exist yet", confidence: 5 };
+  // "src refspec X does not match any" means the LOCAL branch X doesn't
+  // exist — re-running push won't help. checkout_branch creates the
+  // local branch from current HEAD; the retried push then creates the
+  // remote ref too. Common after `git submodule add` clones the default
+  // branch but the user configured a different branch in settings.
+  if (m.includes("src refspec") || (m.includes("does not match any") && !m.includes("upstream"))) {
+    return { tool: "checkout_branch", params: {}, reasoning: "Local branch does not exist yet — creating it from HEAD", confidence: 5 };
+  }
+  if (m.includes("no upstream branch") || m.includes("unborn branch")) {
+    return { tool: "push_set_upstream", params: {}, reasoning: "Local branch has no upstream tracking — setting it now", confidence: 5 };
   }
   if (m.includes("would be overwritten") || m.includes("please commit or stash")) {
     return { tool: "stash_and_pull", params: {}, reasoning: "Uncommitted local changes block merge/checkout", confidence: 5 };

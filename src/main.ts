@@ -1,13 +1,14 @@
 import { Plugin, Notice, FileSystemAdapter } from "obsidian";
 import { GitHubSyncSettings, DEFAULT_SETTINGS, GitHubSyncSettingTab } from "./settings";
-import { setLang } from "./i18n";
 import { GitManager } from "./git/GitManager";
 import { SubmoduleManager } from "./git/SubmoduleManager";
-import { ensureRemoteHasCommits } from "./git/githubApi";
+import { ensureRemoteHasCommits, ensureRemoteBranch, isPushPermissionError } from "./git/githubApi";
 import { SyncScheduler } from "./sync/SyncScheduler";
 import { StatusBar } from "./ui/StatusBar";
 import { SyncDashboard, DASHBOARD_VIEW_TYPE } from "./ui/SyncDashboard";
 import { LocalChangesModal } from "./ui/LocalChangesModal";
+import { SwitchBranchModal } from "./ui/SwitchBranchModal";
+import { L, tf, setLang } from "./i18n";
 import { friendlyError } from "./errors";
 import { VAULT_REPO_ID } from "./types";
 import { AIClient } from "./ai/AIClient";
@@ -35,6 +36,14 @@ export default class GitHubSyncPlugin extends Plugin {
   scheduler: SyncScheduler;
   private statusBar: StatusBar;
   private pendingPollHandle: number | null = null;
+  /**
+   * True while a user-initiated sync is in flight (Sync Now command).
+   * Used so that scheduler completion handlers can distinguish foreground
+   * actions — which deserve a modal when the push hits a permissions wall
+   * — from background autoSync ticks, which should fail silently into the
+   * history rather than nagging every 30 minutes.
+   */
+  private userSyncIntent = false;
 
   /**
    * Resolve the live dashboard view from the workspace rather than holding
@@ -91,6 +100,16 @@ export default class GitHubSyncPlugin extends Plugin {
     this.scheduler.onComplete((id, result) => {
       this.recordHistoryFromResult(id, result);
       void this.refreshStatusBarPending();
+      if (
+        this.userSyncIntent &&
+        id === VAULT_REPO_ID &&
+        result.ok === false
+      ) {
+        this.maybeOfferBranchSwitch(
+          result.error.message,
+          this.settings.mainRepoBranch || "main"
+        );
+      }
     });
 
     // Run between vault and submodule syncs in every cycle:
@@ -120,7 +139,12 @@ export default class GitHubSyncPlugin extends Plugin {
         }
         const silent = this.settings.ai.silentMode;
         if (!silent) new Notice("Sync started…");
-        await this.scheduler.run();
+        this.userSyncIntent = true;
+        try {
+          await this.scheduler.run();
+        } finally {
+          this.userSyncIntent = false;
+        }
         if (!silent) new Notice("Sync finished.");
       },
     });
@@ -226,8 +250,51 @@ export default class GitHubSyncPlugin extends Plugin {
     // the first push lands.
     await ensureRemoteHasCommits(cleanUrl, this.settings.githubToken);
 
+    // If the user typed a branch that doesn't exist on the remote yet,
+    // materialise it from the repo's default branch via the GitHub API.
+    // git push --set-upstream alone is insufficient when the default
+    // branch is protected — protected-branch hooks reject the "create"
+    // half too, so the user can never get past the first push without
+    // either preexisting access or this API-side branch creation.
+    try {
+      const r = await ensureRemoteBranch(cleanUrl, cleanBranch, this.settings.githubToken);
+      if (r.created) {
+        new Notice(tf(L().notices.branchCreated, cleanBranch, r.defaultBranch ?? "default"));
+      }
+    } catch (e) {
+      // Non-fatal: fall through to the git push attempt, which will
+      // surface the real error if branch creation truly isn't possible.
+      console.warn("[agentic-git-sync] ensureRemoteBranch failed:", (e as Error).message);
+    }
+
     await this.gitManager.setOrigin(cleanUrl, cleanBranch);
-    await this.scheduler.runVault("chore: initial vault sync");
+    // Flag this as a user-initiated sync so the scheduler's completion
+    // listener will open the SwitchBranchModal if the push hits a
+    // protected-branch / permission wall on the target branch.
+    this.userSyncIntent = true;
+    try {
+      await this.scheduler.runVault("chore: initial vault sync");
+    } catch (e) {
+      // runVault swallows errors via emitComplete, but be defensive in
+      // case a future refactor lets one escape.
+      if (this.maybeOfferBranchSwitch((e as Error).message, cleanBranch)) return;
+      throw e;
+    } finally {
+      this.userSyncIntent = false;
+    }
+  }
+
+  /**
+   * If a sync just failed because the user can't push to the configured
+   * branch (typically a protected `main`), pop a modal letting them pick
+   * a different branch — we'll create it on the remote from the default
+   * branch and retry the sync. Returns true when the modal was opened.
+   */
+  maybeOfferBranchSwitch(errorMessage: string, branch: string): boolean {
+    if (!isPushPermissionError(errorMessage)) return false;
+    if (!this.settings.mainRepoUrl) return false;
+    new SwitchBranchModal(this.app, this, branch, errorMessage).open();
+    return true;
   }
 
   /**
@@ -337,7 +404,19 @@ export default class GitHubSyncPlugin extends Plugin {
       if (id === VAULT_REPO_ID) this.statusBar.setPhase(progress.phase, progress.message);
       this.dashboard?.onProgress(id, progress);
     });
-    this.scheduler.onComplete((id, result) => this.recordHistoryFromResult(id, result));
+    this.scheduler.onComplete((id, result) => {
+      this.recordHistoryFromResult(id, result);
+      if (
+        this.userSyncIntent &&
+        id === VAULT_REPO_ID &&
+        result.ok === false
+      ) {
+        this.maybeOfferBranchSwitch(
+          result.error.message,
+          this.settings.mainRepoBranch || "main"
+        );
+      }
+    });
     this.scheduler.setBetweenVaultAndSubsHook(async () => {
       await this.reloadRepoConfigOnly();
       await this.autoInitSubmodules();

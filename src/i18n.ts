@@ -273,6 +273,21 @@ const en = {
     autoMerged:         "✓ Auto-merged {0} hunk(s) in {1} file(s)",
     autoMergeFailed:    "Auto-resolved but commit/push failed: {0}",
     configCreated:      "Created {0} — your sync settings will now travel with your repo.",
+    branchCreated:      "Created branch '{0}' on the remote (based on {1}).",
+  },
+
+  switchBranch: {
+    title:              "Can't push to '{0}'",
+    desc:               "You don't have permission to push to '{0}' on this repository. Pick a different branch — it will be created on the remote from the repo's default branch, and your changes will be pushed there.",
+    newBranchLabel:     "New branch name",
+    confirmCta:         "Switch and sync",
+    working:            "Creating branch and syncing…",
+    sameBranch:         "Pick a branch other than the current one.",
+    invalidBranch:      "Branch name has invalid characters.",
+    createdFrom:        "Created '{0}' from {1}. Syncing…",
+    switchedTo:         "Branch '{0}' already exists. Switching…",
+    syncedOnNewBranch:  "Synced to '{0}'.",
+    failed:             "Couldn't switch branch: {0}",
   },
 };
 
@@ -536,5 +551,20 @@ const zh: typeof en = {
     autoMerged:      "✓ 已自动合并 {1} 个文件中的 {0} 个差异块",
     autoMergeFailed: "自动解决成功但提交/推送失败：{0}",
     configCreated:   "已创建 {0}——同步设置将随仓库同步。",
+    branchCreated:   "已在远程创建分支 '{0}'（基于 {1}）。",
+  },
+
+  switchBranch: {
+    title:              "无法推送到 '{0}'",
+    desc:               "您没有权限推送到该仓库的 '{0}' 分支。请选择一个其他分支——插件会基于仓库默认分支在远程创建该分支，并把变更推送到那里。",
+    newBranchLabel:     "新分支名称",
+    confirmCta:         "切换并同步",
+    working:            "正在创建分支并同步…",
+    sameBranch:         "请选择当前分支以外的分支名。",
+    invalidBranch:      "分支名包含非法字符。",
+    createdFrom:        "已基于 {1} 创建 '{0}'，正在同步…",
+    switchedTo:         "分支 '{0}' 已存在，正在切换…",
+    syncedOnNewBranch:  "已同步到 '{0}'。",
+    failed:             "切换分支失败：{0}",
   },
 };
