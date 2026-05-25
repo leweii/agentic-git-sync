@@ -738,17 +738,15 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
               const electron = req("electron") as { shell?: { openPath?: (p: string) => void } };
               electron?.shell?.openPath?.(dir);
               return;
-            } catch { /* fall through to clipboard */ }
+            } catch { /* fall through to manual-path Notice */ }
           }
-          navigator.clipboard?.writeText(dir).catch(() => {});
-          new Notice(tf(t.logFolderCopied, dir), 6000);
+          new Notice(tf(t.logFolderCopied, dir), 8000);
         })
       )
       .addButton((b) =>
         b.setButtonText(t.reportBug).setCta().onClick(async () => {
           const result = await this.plugin.openBugReportEmail();
           if (!result.ok) {
-            if (result.filePath) navigator.clipboard?.writeText(result.filePath).catch(() => {});
             new Notice(
               result.filePath
                 ? tf(t.bugReportNoMail, result.filePath)

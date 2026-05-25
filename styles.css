@@ -971,7 +971,8 @@
   text-align: center;
 }
 .ghs-cv2-empty p { margin: 0 0 12px; color: var(--text-muted); }
-.ghs-cv2-empty-sub { font-size: 0.9em; max-width: 480px; margin: 0 auto 20px !important; }
+/* Specificity-matched (.cls .cls) so we don't need !important to win source order against .ghs-cv2-empty p above. */
+.ghs-cv2-empty .ghs-cv2-empty-sub { font-size: 0.9em; max-width: 480px; margin: 0 auto 20px; }
 .ghs-cv2-empty-actions { display: flex; gap: 8px; justify-content: center; }
 
 /* Header */
