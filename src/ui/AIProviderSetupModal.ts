@@ -3,8 +3,10 @@ import type GitHubSyncPlugin from "../main";
 import { L } from "../i18n";
 
 export class AIProviderSetupModal extends Modal {
-  private deepseek = "";
+  private openai = "";
   private gemini = "";
+  private claude = "";
+  private deepseek = "";
   private saved = false;
   private errorEl: HTMLElement | null = null;
   private saveBtn: HTMLButtonElement | null = null;
@@ -15,8 +17,10 @@ export class AIProviderSetupModal extends Modal {
     private onResolve: (saved: boolean) => void,
   ) {
     super(app);
-    this.deepseek = plugin.settings.ai.deepseekToken;
+    this.openai = plugin.settings.ai.openaiToken;
     this.gemini = plugin.settings.ai.geminiToken;
+    this.claude = plugin.settings.ai.claudeToken;
+    this.deepseek = plugin.settings.ai.deepseekToken;
   }
 
   onOpen(): void {
@@ -32,16 +36,14 @@ export class AIProviderSetupModal extends Modal {
     headerBody.createEl("h3", { text: t.aiSetupTitle });
     headerBody.createEl("p", { text: t.aiSetupDesc, cls: "ghs-ai-setup-sub" });
 
+    // Order: OpenAI → Gemini → Claude → DeepSeek
     this.renderField(contentEl, {
-      label: t.deepseekLabel,
-      hint: t.deepseekDesc,
-      hintHref: "https://platform.deepseek.com/api_keys",
+      label: t.openaiLabel,
+      hint: t.openaiDesc,
+      hintHref: "https://platform.openai.com/api-keys",
       placeholder: "sk-…",
-      initial: this.deepseek,
-      onChange: (v) => {
-        this.deepseek = v.trim();
-        this.refresh();
-      },
+      initial: this.openai,
+      onChange: (v) => { this.openai = v.trim(); this.refresh(); },
     });
 
     this.renderField(contentEl, {
@@ -50,10 +52,25 @@ export class AIProviderSetupModal extends Modal {
       hintHref: "https://aistudio.google.com/app/apikey",
       placeholder: "AIza…",
       initial: this.gemini,
-      onChange: (v) => {
-        this.gemini = v.trim();
-        this.refresh();
-      },
+      onChange: (v) => { this.gemini = v.trim(); this.refresh(); },
+    });
+
+    this.renderField(contentEl, {
+      label: t.claudeLabel,
+      hint: t.claudeDesc,
+      hintHref: "https://console.anthropic.com/settings/keys",
+      placeholder: "sk-ant-…",
+      initial: this.claude,
+      onChange: (v) => { this.claude = v.trim(); this.refresh(); },
+    });
+
+    this.renderField(contentEl, {
+      label: t.deepseekLabel,
+      hint: t.deepseekDesc,
+      hintHref: "https://platform.deepseek.com/api_keys",
+      placeholder: "sk-…",
+      initial: this.deepseek,
+      onChange: (v) => { this.deepseek = v.trim(); this.refresh(); },
     });
 
     this.errorEl = contentEl.createDiv("ghs-ai-setup-error");
@@ -115,22 +132,28 @@ export class AIProviderSetupModal extends Modal {
 
   private refresh(): void {
     if (!this.saveBtn) return;
-    const hasOne = this.deepseek.length > 0 || this.gemini.length > 0;
+    const hasOne =
+      this.openai.length > 0 ||
+      this.gemini.length > 0 ||
+      this.claude.length > 0 ||
+      this.deepseek.length > 0;
     this.saveBtn.disabled = !hasOne;
     if (this.errorEl) this.errorEl.addClass("ghs-hidden");
   }
 
   private async save(): Promise<void> {
     const t = L().settings;
-    if (!this.deepseek && !this.gemini) {
+    if (!this.openai && !this.gemini && !this.claude && !this.deepseek) {
       if (this.errorEl) {
         this.errorEl.removeClass("ghs-hidden");
         this.errorEl.setText(t.aiSetupNoKey);
       }
       return;
     }
-    this.plugin.settings.ai.deepseekToken = this.deepseek;
+    this.plugin.settings.ai.openaiToken = this.openai;
     this.plugin.settings.ai.geminiToken = this.gemini;
+    this.plugin.settings.ai.claudeToken = this.claude;
+    this.plugin.settings.ai.deepseekToken = this.deepseek;
     await this.plugin.saveSettings();
     this.saved = true;
     this.close();

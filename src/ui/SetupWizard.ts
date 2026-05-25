@@ -1,7 +1,8 @@
 import { App, Modal, Notice, requestUrl, setIcon } from "obsidian";
 import type GitHubSyncPlugin from "../main";
 import { isValidGitHubUrl } from "../git/SubmoduleManager";
-import { ensureRemoteHasCommits, type GitHubUser } from "../git/githubApi";
+import { ensureRemoteHasCommits, fetchRepoDefaultBranch, type GitHubUser } from "../git/githubApi";
+import { L } from "../i18n";
 
 interface WizardState {
   githubToken: string;
@@ -77,20 +78,19 @@ export class SetupWizard extends Modal {
 
   private renderWelcome(): void {
     const { contentEl } = this;
+    const w = L().wizard;
+    const s = L().settings;
 
     const hero = contentEl.createDiv("ghs-wizard-hero");
     setIcon(hero.createDiv("ghs-wizard-hero-icon"), "github");
-    // eslint-disable-next-line obsidianmd/ui/sentence-case -- "Agentic Git Sync" is the proper product name
-    hero.createEl("h2", { text: "Welcome to Agentic Git Sync" });
-    hero.createEl("p", {
-      text: "Back up your vault and sync it with GitHub. Credentials stay on this machine — everything else travels with the repo.",
-    });
+    hero.createEl("h2", { text: w.welcomeTitle });
+    hero.createEl("p", { text: w.welcomeDesc });
 
     const list = contentEl.createEl("ul", { cls: "ghs-feature-list" });
     for (const f of [
-      { icon: "cloud", title: "Automatic backup", desc: "Push changes to GitHub on a schedule" },
-      { icon: "refresh-cw", title: "Cross-machine sync", desc: "Pull the repo on any machine — config follows automatically" },
-      { icon: "zap", title: "AI conflict resolution", desc: "Auto-resolve merge conflicts with DeepSeek or Gemini" },
+      { icon: "cloud",      title: w.feat1Title, desc: w.feat1Desc },
+      { icon: "refresh-cw", title: w.feat2Title, desc: w.feat2Desc },
+      { icon: "zap",        title: w.feat3Title, desc: w.feat3Desc },
     ]) {
       const li = list.createEl("li");
       setIcon(li.createSpan({ cls: "icon" }), f.icon);
@@ -99,25 +99,48 @@ export class SetupWizard extends Modal {
       text.createEl("span", { text: ` — ${f.desc}` });
     }
 
+    // Usage-mode chooser sits BELOW the feature list — the welcome message
+    // gets read first; the toggle is the last decision before Get Started.
+    // Saved immediately so revisiting the wizard reflects the choice.
+    const modeWrap = contentEl.createDiv("ghs-wizard-mode");
+    modeWrap.createEl("label", { text: s.sectionUsageMode, cls: "ghs-wizard-mode-label" });
+    const seg = modeWrap.createDiv("ghs-wizard-mode-seg");
+    const setMode = async (m: "personal" | "team") => {
+      this.plugin.settings.usageMode = m;
+      await this.plugin.saveSettings();
+      personalBtn.toggleClass("active", m === "personal");
+      teamBtn.toggleClass("active", m === "team");
+    };
+    const personalBtn = seg.createEl("button", { text: s.usageModePersonal, cls: "ghs-wizard-mode-btn" });
+    personalBtn.onclick = () => setMode("personal");
+    const teamBtn = seg.createEl("button", { text: s.usageModeTeam, cls: "ghs-wizard-mode-btn" });
+    teamBtn.onclick = () => setMode("team");
+    const current = this.plugin.settings.usageMode ?? "personal";
+    personalBtn.toggleClass("active", current === "personal");
+    teamBtn.toggleClass("active", current === "team");
+    modeWrap.createEl("div", { cls: "ghs-wizard-mode-desc", text: s.usageModeDesc });
+
     const footer = contentEl.createDiv("ghs-wizard-footer");
     footer.createSpan();
-    this.btn(footer, "Get Started", true, () => this.goTo(1));
+    this.btn(footer, w.getStarted, true, () => this.goTo(1));
   }
 
   // ── Step 1: Credentials ──────────────────────────────────────
 
   private renderCredentials(): void {
     const { contentEl } = this;
+    const w = L().wizard;
+    const c = L().common;
 
     const hero = contentEl.createDiv("ghs-wizard-hero");
     setIcon(hero.createDiv("ghs-wizard-hero-icon"), "key");
-    hero.createEl("h2", { text: "Your credentials" });
-    hero.createEl("p", { text: "Stored locally — never committed to any repo." });
+    hero.createEl("h2", { text: w.credTitle });
+    hero.createEl("p", { text: w.credDesc });
 
     // Token field with show/hide toggle + help link
     const tokenWrap = contentEl.createDiv("ghs-wizard-field");
     const labelRow = tokenWrap.createDiv("ghs-wizard-label-row");
-    labelRow.createEl("label", { text: "GitHub personal access token" });
+    labelRow.createEl("label", { text: w.tokenLabel });
     const helpBtn = labelRow.createEl("button", {
       cls: "ghs-help-btn",
       // eslint-disable-next-line obsidianmd/ui/sentence-case -- pronoun "I" must stay capitalized
@@ -140,29 +163,18 @@ export class SetupWizard extends Modal {
       tokenInput.type = tokenInput.type === "password" ? "text" : "password";
     };
     const hint = tokenWrap.createDiv("ghs-hint");
-    hint.appendText("Needs ");
     // eslint-disable-next-line obsidianmd/ui/sentence-case -- "repo" is a GitHub scope identifier
     hint.createEl("code", { text: "repo" });
-    hint.appendText(" scope. Don't have one? Click the ");
-    const inlineHelp = hint.createEl("a", {
-      // eslint-disable-next-line obsidianmd/ui/sentence-case -- "? icon above" refers to a literal "?" button label
-      text: "? icon above",
-      attr: { href: "https://github.com/settings/personal-access-tokens" },
-    });
-    inlineHelp.onclick = (e) => {
-      e.preventDefault();
-      window.open("https://github.com/settings/personal-access-tokens", "_blank");
-    };
-    hint.appendText(" to create one.");
+    hint.appendText(" " + w.tokenScope);
 
     const badge = contentEl.createDiv("ghs-wizard-badge-row");
     if (this.tokenStatus !== "idle") this.renderTokenBadge(badge);
 
     // Identity fields — auto-filled from GitHub after token verifies
-    const nameInput = this.field(contentEl, "Your Name", "Jane Smith");
+    const nameInput = this.field(contentEl, w.nameLabel, w.namePlaceholder);
     nameInput.value = this.state.gitUser;
 
-    const emailInput = this.field(contentEl, "Email", "jane@example.com");
+    const emailInput = this.field(contentEl, w.emailLabel, w.emailPlaceholder);
     emailInput.value = this.state.gitEmail;
 
     tokenInput.oninput = () => {
@@ -180,18 +192,18 @@ export class SetupWizard extends Modal {
     };
 
     const footer = contentEl.createDiv("ghs-wizard-footer");
-    this.btn(footer, "Back", false, () => this.goTo(0));
-    this.btn(footer, "Next", true, async () => {
+    this.btn(footer, c.back, false, () => this.goTo(0));
+    this.btn(footer, c.next, true, async () => {
       this.state.githubToken = tokenInput.value.trim();
       this.state.gitUser = nameInput.value.trim();
       this.state.gitEmail = emailInput.value.trim();
 
       if (!this.state.githubToken) {
-        new Notice("Please enter your GitHub token.");
+        new Notice(w.tokenRequired);
         return;
       }
       if (!this.state.gitUser || !this.state.gitEmail) {
-        new Notice("Name and email are required.");
+        new Notice(w.nameEmailReq);
         return;
       }
 
@@ -267,20 +279,43 @@ export class SetupWizard extends Modal {
   private renderRepo(): void {
     const { contentEl } = this;
 
+    const t = L().wizard;
+    const c = L().common;
     const hero = contentEl.createDiv("ghs-wizard-hero");
     setIcon(hero.createDiv("ghs-wizard-hero-icon"), "git-branch");
-    hero.createEl("h2", { text: "Connect a repository" });
-    hero.createEl("p", {
-      text: "Settings are saved to .github-sync.json and travel with the repo — teammates who clone it get the config automatically.",
-    });
+    hero.createEl("h2", { text: t.repoTitle });
+    hero.createEl("p", { text: t.repoDesc });
 
-    const urlInput = this.field(contentEl, "GitHub Remote URL", "https://github.com/you/vault.git");
+    const urlInput = this.field(contentEl, t.repoUrlLabel, t.repoUrlPlaceholder);
     urlInput.value = this.state.repoUrl;
 
     const urlBadge = contentEl.createDiv("ghs-wizard-badge-row");
 
-    const branchInput = this.field(contentEl, "Branch", "main");
+    const branchInput = this.field(contentEl, t.branchLabel, "main");
     branchInput.value = this.state.branch;
+
+    // Track whether the user manually edited the branch field. If they did,
+    // we stop auto-filling from the GitHub default — their intent wins.
+    let branchUserEdited = this.state.branch !== "" && this.state.branch !== "main";
+    branchInput.addEventListener("input", () => { branchUserEdited = true; });
+
+    // Debounced default-branch detection: after the URL looks valid, ask
+    // GitHub for the repo's actual default branch (main, master, develop, …)
+    // and pre-fill the Branch field unless the user has typed something custom.
+    let detectTimer: number | null = null;
+    let lastDetectedUrl = "";
+    const detectDefaultBranch = (url: string) => {
+      if (detectTimer !== null) window.clearTimeout(detectTimer);
+      detectTimer = window.setTimeout(async () => {
+        if (url === lastDetectedUrl) return;
+        lastDetectedUrl = url;
+        const def = await fetchRepoDefaultBranch(url, this.state.githubToken);
+        if (def && !branchUserEdited) {
+          branchInput.value = def;
+          this.state.branch = def;
+        }
+      }, 400);
+    };
 
     const refreshUrlBadge = () => {
       urlBadge.empty();
@@ -289,19 +324,20 @@ export class SetupWizard extends Modal {
       const ok = isValidGitHubUrl(v);
       const b = urlBadge.createDiv({ cls: `ghs-status-badge ${ok ? "success" : "error"}` });
       setIcon(b.createSpan({ cls: "ghs-badge-icon" }), ok ? "check-circle" : "alert-circle");
-      b.createSpan({ text: ok ? "Looks like a valid GitHub URL" : "Doesn't look like a GitHub URL" });
+      b.createSpan({ text: ok ? t.validUrl : t.invalidUrl });
+      if (ok) detectDefaultBranch(v);
     };
 
     urlInput.oninput = refreshUrlBadge;
     refreshUrlBadge();
 
     const footer = contentEl.createDiv("ghs-wizard-footer");
-    const skip = footer.createEl("span", { cls: "ghs-skip", text: "Skip for now" });
+    const skip = footer.createEl("span", { cls: "ghs-skip", text: c.skip });
     skip.onclick = () => this.goTo(3);
 
     const btnGroup = footer.createDiv("ghs-btn-group");
-    this.btn(btnGroup, "Back", false, () => this.goTo(1));
-    const finishBtn = this.btn(btnGroup, "Finish", true, async () => {
+    this.btn(btnGroup, c.back, false, () => this.goTo(1));
+    const finishBtn = this.btn(btnGroup, c.finish, true, async () => {
       const url = urlInput.value.trim();
       const branch = branchInput.value.trim() || "main";
 

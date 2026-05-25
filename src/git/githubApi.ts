@@ -225,6 +225,37 @@ interface GitHubRefObject { object?: { sha?: string } }
 interface GitHubRepoMeta { default_branch?: string }
 
 /**
+ * Resolve the repo's actual default branch via the GitHub API. Returns null
+ * on any failure (bad URL, missing token, network error, repo not found).
+ *
+ * Used by the setup wizard to pre-fill the Branch field — not every repo
+ * uses "main"; many older ones still use "master", and self-hosted policies
+ * vary. Guessing wrong here causes "src refspec ... does not match" on first
+ * push, which is the kind of cryptic error this plugin exists to avoid.
+ */
+export async function fetchRepoDefaultBranch(
+  remoteUrl: string,
+  token: string,
+): Promise<string | null> {
+  const parsed = parseOwnerRepo(remoteUrl);
+  if (!parsed) return null;
+  const { owner, repo } = parsed;
+  const headers: Record<string, string> = { "User-Agent": "ObsidianGitHubSync" };
+  if (token) headers["Authorization"] = `token ${token}`;
+  try {
+    const res = await requestUrl({
+      url: `https://api.github.com/repos/${owner}/${repo}`,
+      headers,
+      throw: false,
+    });
+    if (res.status !== 200) return null;
+    return (res.json as GitHubRepoMeta | null)?.default_branch ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * If `branch` doesn't exist on the remote yet, create it from the repo's
  * default branch via the GitHub Git Refs API. Returns whether the branch
  * was newly created and the default branch it was based on.

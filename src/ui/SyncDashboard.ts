@@ -4,7 +4,6 @@ import type { PendingChanges, SyncHistoryEntry, SyncPhase, SyncProgress } from "
 import { VAULT_REPO_ID } from "../types";
 import { AddSubmoduleModal } from "./AddSubmoduleModal";
 import { ConflictModal } from "./ConflictModal";
-import { PullFromBranchModal } from "./PullFromBranchModal";
 import { SyncPreviewModal } from "./SyncPreviewModal";
 import { timeAgo } from "./StatusBar";
 import { friendlyError } from "../errors";
@@ -214,17 +213,10 @@ export class SyncDashboard extends ItemView {
     setIcon(syncBtn, "refresh-cw");
     syncBtn.onclick = () => this.syncOne(state.id);
 
-    // Submodule cards get a "Pull from..." button (merge a chosen
-    // branch into the current one) and a remove button — main vault is
-    // removed via Settings, and its branch ops belong in Settings too.
+    // Submodule cards get a remove button — main vault is removed via
+    // Settings. Cross-branch merges run automatically via upstreamBranch
+    // during sync; no separate "Pull from..." button needed.
     if (state.id !== VAULT_REPO_ID) {
-      const pullBtn = actions.createEl("button", {
-        cls: "ghs-icon-btn",
-        attr: { title: `Pull from another branch into ${state.label}` },
-      });
-      setIcon(pullBtn, "git-pull-request");
-      pullBtn.onclick = () => this.openPullFromBranch(state.id);
-
       const removeBtn = actions.createEl("button", {
         cls: "ghs-icon-btn",
         attr: { title: `Remove ${state.label}` },
@@ -369,6 +361,7 @@ export class SyncDashboard extends ItemView {
   // ── Actions ──────────────────────────────────────────────────
 
   private async syncAll(): Promise<void> {
+    this.plugin.eventLog?.log({ kind: "user_action", action: "click_sync_all" });
     if (this.plugin.scheduler.isRunning) {
       new Notice("Sync already in progress.");
       return;
@@ -377,9 +370,12 @@ export class SyncDashboard extends ItemView {
     void this.refreshPendingCounts();
   }
 
+
   private async syncOne(id: string): Promise<void> {
-    if (id === VAULT_REPO_ID) await this.plugin.scheduler.runVault();
-    else await this.plugin.scheduler.runSubmodule(id);
+    this.plugin.eventLog?.log({ kind: "user_action", action: "click_sync_one", repo: id });
+    // Manual click — bypass the conflict block so the user can retry on demand.
+    if (id === VAULT_REPO_ID) await this.plugin.scheduler.runVault(undefined, { force: true });
+    else await this.plugin.scheduler.runSubmodule(id, undefined, { force: true });
     void this.refreshPendingCounts();
   }
 
@@ -418,16 +414,8 @@ export class SyncDashboard extends ItemView {
     }
   }
 
-  private openPullFromBranch(id: string): void {
-    const sub = this.plugin.settings.submodules.find((s) => s.id === id);
-    if (!sub) {
-      new Notice("Couldn't find submodule.");
-      return;
-    }
-    new PullFromBranchModal(this.app, this.plugin, sub).open();
-  }
-
   private openConflict(id: string): void {
+    this.plugin.eventLog?.log({ kind: "user_action", action: "click_resolve", repo: id });
     const card = this.cards.get(id);
     if (!card || !card.state.conflicts || card.state.conflicts.length === 0) return;
     const ops = this.plugin.getRepoOps(card.state.id);
@@ -440,6 +428,10 @@ export class SyncDashboard extends ItemView {
       ops,
       card.state.conflicts,
       () => {
+        // User finished the resolution flow — clear the scheduler's conflict
+        // block so the next auto-cycle attempts a sync. If the conflict
+        // persists, the scheduler will re-block on the next failure.
+        this.plugin.scheduler.unblock(card.state.id);
         card.state.phase = "idle";
         card.state.conflicts = undefined;
         card.state.errorMsg = undefined;
@@ -447,7 +439,23 @@ export class SyncDashboard extends ItemView {
         void this.refreshPendingCounts();
       },
       card.state.label,
-      this.plugin.getAIClient()
+      this.plugin.getAIClient(),
+      async () => {
+        this.plugin.eventLog?.log({
+          kind: "user_action",
+          action: "click_force_clean_resync",
+          repo: card.state.id,
+        });
+        // Force clean & resync — bypass the scheduler block (this run is
+        // user-initiated) and retry the failing repo immediately.
+        this.plugin.scheduler.unblock(card.state.id);
+        if (card.state.id === VAULT_REPO_ID) {
+          await this.plugin.scheduler.runVault(undefined, { force: true });
+        } else {
+          await this.plugin.scheduler.runSubmodule(card.state.id, undefined, { force: true });
+        }
+        void this.refreshPendingCounts();
+      },
     ).open();
   }
 
@@ -532,3 +540,4 @@ function labelForPhase(p: SyncPhase): string {
 function formatRemote(url: string): string {
   return url.replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "");
 }
+

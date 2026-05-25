@@ -15,6 +15,8 @@ const PRICING: Record<string, { in: number; out: number }> = {
   "gemini-1.5-flash-8b":  { in: 0,                       out: 0 },
   "gemini-1.5-pro":       { in: 1.25 / 1_000_000,        out: 5.00 / 1_000_000 },
   "gemini-2.0-flash":     { in: 0.075 / 1_000_000,       out: 0.30 / 1_000_000 },
+  "gemini-2.5-flash":     { in: 0.075 / 1_000_000,       out: 0.30 / 1_000_000 },
+  "gemini-2.5-pro":       { in: 1.25 / 1_000_000,        out: 5.00 / 1_000_000 },
 };
 
 export interface GeminiConfig {
@@ -33,7 +35,7 @@ export class GeminiProvider implements AIProvider {
   private temperature: number;
 
   constructor(private cfg: GeminiConfig) {
-    this.model = cfg.model ?? "gemini-1.5-flash";
+    this.model = cfg.model ?? "gemini-2.5-flash";
     this.maxTokens = cfg.maxTokens ?? 4096;
     this.temperature = cfg.temperature ?? 0.2;
   }
@@ -69,7 +71,7 @@ export class GeminiProvider implements AIProvider {
     });
 
     if (res.status !== 200) {
-      throw new Error(`Gemini HTTP ${res.status} — ${truncate(res.text, 200)}`);
+      throw new Error(humanizeGeminiError(res.status, res.text));
     }
 
     const body = res.json as GeminiResponse | null;
@@ -79,7 +81,7 @@ export class GeminiProvider implements AIProvider {
     const parsed = parseAIResponse(content);
     const inputTokens = Number(body?.usageMetadata?.promptTokenCount ?? 0);
     const outputTokens = Number(body?.usageMetadata?.candidatesTokenCount ?? 0);
-    const price = PRICING[this.model] ?? PRICING["gemini-1.5-flash"];
+    const price = PRICING[this.model] ?? PRICING["gemini-2.5-flash"];
 
     return {
       ...parsed,
@@ -111,7 +113,7 @@ export class GeminiProvider implements AIProvider {
     });
 
     if (res.status !== 200) {
-      throw new Error(`Gemini HTTP ${res.status} — ${truncate(res.text, 200)}`);
+      throw new Error(humanizeGeminiError(res.status, res.text));
     }
 
     const body = res.json as GeminiResponse | null;
@@ -122,4 +124,29 @@ export class GeminiProvider implements AIProvider {
 function truncate(s: string | undefined, n: number): string {
   if (!s) return "";
   return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+/**
+ * Recognise common Gemini API failures and return a one-line message
+ * instead of dumping the raw JSON. Right now this only specialises the
+ * region case (`FAILED_PRECONDITION` + "User location is not supported")
+ * because the raw body is bigger than a Notice can readably hold; every
+ * other status falls through to the same `Gemini HTTP <n> — <body>`
+ * shape we've always used.
+ */
+function humanizeGeminiError(status: number, text: string | undefined): string {
+  if (status === 400 && text) {
+    try {
+      const body = JSON.parse(text) as {
+        error?: { status?: string; message?: string };
+      };
+      if (
+        body.error?.status === "FAILED_PRECONDITION" ||
+        /user location is not supported/i.test(body.error?.message ?? "")
+      ) {
+        return "Gemini: region not supported";
+      }
+    } catch { /* fall through to default */ }
+  }
+  return `Gemini HTTP ${status} — ${truncate(text, 200)}`;
 }

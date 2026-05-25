@@ -5,6 +5,9 @@ import type { PendingChanges, SyncProgress } from "../types";
 import { GitManager, GitConflictError } from "./GitManager";
 import type { ProgressFn } from "./GitManager";
 import { ensureRemoteBranch } from "./githubApi";
+import type { AIProvider } from "../ai/AIProvider";
+import type { EventLog } from "../observability/EventLog";
+import { wrapGitWithLogging } from "./loggedGit";
 
 // Direct `fs` use is bounded to: (a) the submodule's working-tree
 // directory under `<vault>/<localPath>`, and (b) the submodule's git
@@ -21,9 +24,12 @@ export class SubmoduleManager {
     private user: string,
     private email: string,
     private token: string,
-    private configDir: string
+    private configDir: string,
+    private providers: AIProvider[] = [],
+    private eventLog: EventLog | null = null,
   ) {
-    this.git = simpleGit(vaultPath);
+    const raw = simpleGit(vaultPath);
+    this.git = eventLog ? wrapGitWithLogging(raw, eventLog, "main") : raw;
   }
 
   // ── Submodule lifecycle ──────────────────────────────────────────
@@ -228,26 +234,6 @@ export class SubmoduleManager {
     return count;
   }
 
-  /**
-   * Manual one-shot: merge `sourceBranch` from the submodule's remote
-   * into its current working branch and push the result. Used by the
-   * dashboard's "Pull from..." action. Conflicts surface through the
-   * normal GitConflictError path so the caller can route to the
-   * ConflictModal.
-   */
-  async mergeFromBranch(
-    config: SubmoduleConfig,
-    sourceBranch: string,
-    onProgress?: ProgressFn
-  ): Promise<void> {
-    await this.getSubGM(config).mergeAndPushFromBranch(
-      config.branch,
-      sourceBranch,
-      onProgress
-    );
-    await this.updateParentPointer(config);
-  }
-
   /** Commit staged conflict resolution and push — both submodule and parent pointer. */
   async commitMergedAndPush(
     config: SubmoduleConfig,
@@ -303,7 +289,10 @@ export class SubmoduleManager {
         this.user,
         this.email,
         this.token,
-        this.configDir
+        this.configDir,
+        this.providers,
+        this.eventLog,
+        config.id,
       );
       this.gitManagers.set(config.id, gm);
     }

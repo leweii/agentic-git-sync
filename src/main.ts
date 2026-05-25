@@ -1,5 +1,7 @@
 import { Plugin, Notice, FileSystemAdapter } from "obsidian";
-import { GitHubSyncSettings, DEFAULT_SETTINGS, GitHubSyncSettingTab } from "./settings";
+import { fs, path } from "./node-builtins";
+import { EventLog } from "./observability/EventLog";
+import { GitHubSyncSettings, DEFAULT_SETTINGS, GitHubSyncSettingTab, migrateStaleModels } from "./settings";
 import { GitManager } from "./git/GitManager";
 import { SubmoduleManager } from "./git/SubmoduleManager";
 import { ensureRemoteHasCommits, ensureRemoteBranch, isPushPermissionError } from "./git/githubApi";
@@ -12,8 +14,10 @@ import { L, tf, setLang } from "./i18n";
 import { friendlyError } from "./errors";
 import { VAULT_REPO_ID } from "./types";
 import { AIClient } from "./ai/AIClient";
-import { DeepSeekProvider } from "./ai/DeepSeekProvider";
+import { OpenAIProvider } from "./ai/OpenAIProvider";
 import { GeminiProvider } from "./ai/GeminiProvider";
+import { ClaudeProvider } from "./ai/ClaudeProvider";
+import { DeepSeekProvider } from "./ai/DeepSeekProvider";
 import type { AIProvider } from "./ai/AIProvider";
 import { AutoResolver } from "./sync/AutoResolver";
 import type { ConflictRepoOps } from "./sync/ConflictRepoOps";
@@ -34,6 +38,8 @@ export default class GitHubSyncPlugin extends Plugin {
   gitManager: GitManager;
   submoduleManager: SubmoduleManager;
   scheduler: SyncScheduler;
+  /** Append-only JSONL log of everything the plugin does — see EventLog. */
+  eventLog: EventLog;
   private statusBar: StatusBar;
   private pendingPollHandle: number | null = null;
   /**
@@ -74,6 +80,7 @@ export default class GitHubSyncPlugin extends Plugin {
     setLang(this.settings.language ?? "en");
 
     const vaultPath = this.getVaultPath();
+    this.eventLog = new EventLog(vaultPath);
 
     // If user already had settings in data.json but no .github-sync.json
     // yet, generate one — runs once, then a no-op forever after.
@@ -87,7 +94,8 @@ export default class GitHubSyncPlugin extends Plugin {
     this.scheduler = new SyncScheduler(
       this.gitManager,
       this.submoduleManager,
-      () => this.settings
+      () => this.settings,
+      this.eventLog,
     );
 
     this.scheduler.onStatus((id, progress) => {
@@ -133,6 +141,7 @@ export default class GitHubSyncPlugin extends Plugin {
       id: "sync-now",
       name: "Sync now",
       callback: async () => {
+        this.eventLog?.log({ kind: "user_action", action: "command_sync_now" });
         if (this.scheduler.isRunning) {
           new Notice("Sync already in progress.");
           return;
@@ -303,11 +312,22 @@ export default class GitHubSyncPlugin extends Plugin {
    * .gitmodules + the submodule pointer locally; without a follow-up
    * vault sync those would just sit in the index until the next manual
    * sync. saveSettings() also writes .github-sync.json — same problem.
+   *
+   * Settings are persisted **before** the git op so a failed clone
+   * (e.g. SSO-blocked token, missing org grant) doesn't throw the
+   * user's input away. The submodule then shows up in the settings
+   * list with a Test button so the user can diagnose and retry from
+   * there. Idempotent on re-entry so the modal's recovery path can
+   * safely call this method twice with the same config.
    */
   async addSubmodule(config: SubmoduleConfig): Promise<void> {
+    const alreadyKnown = this.settings.submodules.some((s) => s.id === config.id);
+    if (!alreadyKnown) {
+      this.settings.submodules.push(config);
+      await this.saveSettings();
+      this.dashboard?.refreshRepos();
+    }
     await this.submoduleManager.add(config);
-    this.settings.submodules.push(config);
-    await this.saveSettings();
     try {
       await this.scheduler.runVault(`chore: add submodule ${config.localPath}`);
     } catch { /* swallow — settings are saved either way */ }
@@ -440,25 +460,38 @@ export default class GitHubSyncPlugin extends Plugin {
       this.settings.gitEmail,
       this.settings.githubToken,
       configDir,
-      providers
+      providers,
+      this.eventLog,
+      VAULT_REPO_ID,
     );
     this.submoduleManager = new SubmoduleManager(
       vaultPath,
       this.settings.gitUser,
       this.settings.gitEmail,
       this.settings.githubToken,
-      configDir
+      configDir,
+      providers,
+      this.eventLog,
     );
   }
 
   private buildAIProviders(): AIProvider[] {
+    // Order = preference. The ReAct agent tries providers in this order
+    // and stops at the first one that returns a usable response.
+    // Product decision: OpenAI → Gemini → Claude → DeepSeek.
     const ai = this.settings.ai;
     const providers: AIProvider[] = [];
-    if (ai.deepseekToken) {
-      providers.push(new DeepSeekProvider({ token: ai.deepseekToken, model: ai.deepseekModel }));
+    if (ai.openaiToken) {
+      providers.push(new OpenAIProvider({ token: ai.openaiToken, model: ai.openaiModel }));
     }
     if (ai.geminiToken) {
       providers.push(new GeminiProvider({ token: ai.geminiToken, model: ai.geminiModel }));
+    }
+    if (ai.claudeToken) {
+      providers.push(new ClaudeProvider({ token: ai.claudeToken, model: ai.claudeModel }));
+    }
+    if (ai.deepseekToken) {
+      providers.push(new DeepSeekProvider({ token: ai.deepseekToken, model: ai.deepseekModel }));
     }
     return providers;
   }
@@ -469,7 +502,8 @@ export default class GitHubSyncPlugin extends Plugin {
     this.scheduler = new SyncScheduler(
       this.gitManager,
       this.submoduleManager,
-      () => this.settings
+      () => this.settings,
+      this.eventLog,
     );
     this.scheduler.onStatus((id, progress) => {
       if (id === VAULT_REPO_ID) this.statusBar.setPhase(progress.phase, progress.message);
@@ -630,11 +664,21 @@ export default class GitHubSyncPlugin extends Plugin {
     const local = (await this.loadData()) as Partial<GitHubSyncSettings> | null;
     let merged: GitHubSyncSettings = Object.assign({}, DEFAULT_SETTINGS, local ?? {});
 
+    // Migrate retired model names so users who installed an older
+    // version don't get HTTP 404s when their saved provider model has
+    // been sunset upstream. The model field has no UI yet, so any
+    // value that matches a known old default is "stale by default,
+    // not explicit choice" — safe to bump silently.
+    merged.ai = migrateStaleModels({ ...DEFAULT_SETTINGS.ai, ...merged.ai });
+
     // Repo layer: structural config (.github-sync.json) overlays local
     try {
       const repoCfg = await readRepoConfig(this.app.vault.adapter, "");
       if (repoCfg) {
         merged = applyRepoConfig(merged, repoCfg);
+        // Re-run migration after the repo overlay — .github-sync.json
+        // saved by an older install can re-introduce a sunset model.
+        merged.ai = migrateStaleModels(merged.ai);
       }
     } catch (e) {
       console.warn("[github-sync] applyRepoConfig failed:", e);
@@ -660,6 +704,190 @@ export default class GitHubSyncPlugin extends Plugin {
       console.warn("[github-sync] couldn't write .github-sync.json:", e);
     }
     this.dashboard?.refreshRepos();
+  }
+
+  /**
+   * Hard reset for when the plugin is wedged. Does three things:
+   *  1. Renames each submodule directory wholesale to <path>.reset-<ts>/
+   *     — the directory, its working tree, its .git gitfile, and any
+   *     repo-config files all move together. Effectively "remove the
+   *     submodule" while keeping a recoverable backup.
+   *  2. Renames the main vault's .git/ to .git.reset-<ts>/ and deletes the
+   *     top-level .github-sync.json. The vault root itself stays.
+   *  3. Rewrites data.json with DEFAULT_SETTINGS so the plugin starts fresh.
+   *
+   * User notes (markdown files in the main vault) are NEVER touched.
+   * Submodule contents are MOVED (not deleted) — recover by renaming
+   * <path>.reset-<ts>/ back to <path>/.
+   *
+   * Caller should prompt the user to disable + re-enable the plugin afterwards
+   * so the in-memory GitManager / SubmoduleManager re-initialise cleanly.
+   */
+  /**
+   * Build a self-contained bug report (manifest info + sanitised event logs).
+   * Returns BOTH the full content and a backup file path. The caller embeds
+   * the content directly in the mailto body — mailto: doesn't support
+   * attachments, so inline is the only way the user gets a single-click flow.
+   *
+   * Privacy: event log is already sanitised (tokens stripped). data.json is
+   * NEVER included.
+   */
+  async bundleBugReport(): Promise<{ filePath: string; content: string }> {
+    const vaultPath = this.getVaultPath();
+    const logDir = path.join(vaultPath, ".obsidian", "plugins", "agentic-git-sync", "event-log");
+    const reportDir = path.join(vaultPath, ".obsidian", "plugins", "agentic-git-sync", "bug-reports");
+    fs.mkdirSync(reportDir, { recursive: true });
+
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const file = path.join(reportDir, `bug-report-${ts}.txt`);
+
+    const sections: string[] = [];
+    sections.push("=== Agentic Git Sync — Bug Report ===");
+    sections.push(`Time: ${new Date().toISOString()}`);
+    sections.push(`Plugin: ${this.manifest.id}@${this.manifest.version}`);
+    sections.push(`Obsidian: ${(this.app as unknown as { appVersion?: string }).appVersion ?? "unknown"}`);
+    sections.push(`Platform: ${navigator.platform}`);
+    sections.push("");
+    sections.push("=== Configured submodules ===");
+    for (const s of this.settings.submodules) {
+      sections.push(`  ${s.localPath}  branch=${s.branch}  upstream=${s.upstreamBranch ?? "(none)"}`);
+    }
+    sections.push("");
+    sections.push("=== AI providers ===");
+    sections.push(`  deepseek: ${this.settings.ai.deepseekToken ? this.settings.ai.deepseekModel : "(not configured)"}`);
+    sections.push(`  gemini:   ${this.settings.ai.geminiToken ? this.settings.ai.geminiModel : "(not configured)"}`);
+    sections.push(`  openai:   ${this.settings.ai.openaiToken ? this.settings.ai.openaiModel : "(not configured)"}`);
+    sections.push("");
+
+    try {
+      const files = fs.readdirSync(logDir)
+        .filter((n) => n.endsWith(".jsonl"))
+        .sort();
+      for (const f of files) {
+        sections.push(`=== ${f} ===`);
+        try {
+          sections.push(fs.readFileSync(path.join(logDir, f), "utf8"));
+        } catch (e) {
+          sections.push(`<could not read: ${(e as Error).message}>`);
+        }
+        sections.push("");
+      }
+      if (files.length === 0) {
+        sections.push("=== (no event log files found) ===");
+      }
+    } catch {
+      sections.push("=== (event log directory missing) ===");
+    }
+
+    const content = sections.join("\n");
+    fs.writeFileSync(file, content);
+    this.eventLog?.log({
+      kind: "user_action",
+      action: "bundle_bug_report",
+      reportFile: file,
+      contentChars: content.length,
+    });
+    return { filePath: file, content };
+  }
+
+  /**
+   * One-click bug-report flow: bundle log, open user's mail client prefilled
+   * to lewei.me@gmail.com with the log content inline in the body. Returns
+   * a status the UI uses to surface an appropriate Notice.
+   */
+  async openBugReportEmail(): Promise<{
+    ok: boolean;
+    truncated: boolean;
+    filePath: string;
+    error?: string;
+  }> {
+    this.eventLog?.log({ kind: "user_action", action: "click_report_bug" });
+    let bundle: { filePath: string; content: string };
+    try {
+      bundle = await this.bundleBugReport();
+    } catch (e) {
+      return { ok: false, truncated: false, filePath: "", error: (e as Error).message };
+    }
+
+    const intro =
+      "Briefly, what went wrong:\n\n\n\n" +
+      "Steps to reproduce (if you can):\n\n\n\n" +
+      "---\n" +
+      "Below is an auto-generated diagnostic dump. Tokens were stripped.\n" +
+      "---\n\n";
+    const trimmed = trimForMailto(bundle.content, intro);
+    const body = encodeURIComponent(intro + trimmed.content);
+    const subject = encodeURIComponent("Agentic Git Sync — bug report");
+    const mailto = `mailto:lewei.me@gmail.com?subject=${subject}&body=${body}`;
+
+    const req = (window as unknown as { require?: (m: string) => unknown }).require;
+    if (req) {
+      try {
+        const electron = req("electron") as {
+          shell?: { openExternal?: (url: string) => Promise<void> };
+        };
+        await electron?.shell?.openExternal?.(mailto);
+        return { ok: true, truncated: trimmed.truncated, filePath: bundle.filePath };
+      } catch (e) {
+        return {
+          ok: false,
+          truncated: trimmed.truncated,
+          filePath: bundle.filePath,
+          error: (e as Error).message,
+        };
+      }
+    }
+    return {
+      ok: false,
+      truncated: trimmed.truncated,
+      filePath: bundle.filePath,
+      error: "Electron shell unavailable",
+    };
+  }
+
+  async resetEverything(): Promise<{ backupPaths: string[]; cleared: string[] }> {
+    this.eventLog?.log({ kind: "user_action", action: "reset_plugin" });
+    const vaultPath = this.getVaultPath();
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const backupPaths: string[] = [];
+    const cleared: string[] = [];
+
+    // Snapshot submodule local paths before settings get reset.
+    const subPaths = this.settings.submodules.map((s) => s.localPath);
+
+    // 1. Each submodule directory moves wholesale to <path>.reset-<ts>/
+    for (const subPath of subPaths) {
+      const abs = path.join(vaultPath, subPath);
+      try {
+        fs.statSync(abs);
+        const backup = `${abs}.reset-${ts}`;
+        fs.renameSync(abs, backup);
+        backupPaths.push(backup);
+      } catch { /* directory missing — skip */ }
+    }
+
+    // 2. Main vault .git/ + top-level repo config
+    const mainGit = path.join(vaultPath, ".git");
+    try {
+      fs.statSync(mainGit);
+      const backup = path.join(vaultPath, `.git.reset-${ts}`);
+      fs.renameSync(mainGit, backup);
+      backupPaths.push(backup);
+    } catch { /* no .git at root — skip */ }
+
+    const mainCfg = path.join(vaultPath, REPO_CONFIG_FILENAME);
+    try {
+      fs.unlinkSync(mainCfg);
+      cleared.push(mainCfg);
+    } catch { /* absent — skip */ }
+
+    // 3. Reset in-memory + on-disk settings to defaults. saveData() (not
+    // saveSettings()) — we deliberately skip the .github-sync.json write
+    // because we just deleted it.
+    this.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+    await this.saveData(this.settings);
+    this.dashboard?.refreshRepos();
+    return { backupPaths, cleared };
   }
 
   /**
@@ -703,13 +931,20 @@ export default class GitHubSyncPlugin extends Plugin {
   }
 
   getAIClient(): AIClient {
+    // Same preference order as buildAIProviders — OpenAI → Gemini → Claude → DeepSeek.
     const ai = this.settings.ai;
     const providers: AIProvider[] = [];
-    if (ai.deepseekToken) {
-      providers.push(new DeepSeekProvider({ token: ai.deepseekToken, model: ai.deepseekModel }));
+    if (ai.openaiToken) {
+      providers.push(new OpenAIProvider({ token: ai.openaiToken, model: ai.openaiModel }));
     }
     if (ai.geminiToken) {
       providers.push(new GeminiProvider({ token: ai.geminiToken, model: ai.geminiModel }));
+    }
+    if (ai.claudeToken) {
+      providers.push(new ClaudeProvider({ token: ai.claudeToken, model: ai.claudeModel }));
+    }
+    if (ai.deepseekToken) {
+      providers.push(new DeepSeekProvider({ token: ai.deepseekToken, model: ai.deepseekModel }));
     }
     return new AIClient(providers, {
       enabled: ai.enabled,
@@ -745,4 +980,36 @@ export default class GitHubSyncPlugin extends Plugin {
       await this.app.workspace.revealLeaf(leaf);
     }
   }
+}
+
+/**
+ * mailto: body budget. macOS Mail handles ~50 KB encoded reliably; we aim
+ * for ~30 KB raw to stay safely inside that. The full content is always
+ * saved to disk so the user can recover the trimmed parts if needed.
+ */
+const MAX_BODY_CHARS = 30_000;
+
+function trimForMailto(content: string, intro: string): { content: string; truncated: boolean } {
+  const budget = MAX_BODY_CHARS - intro.length;
+  if (content.length <= budget) return { content, truncated: false };
+
+  const eventsStart = content.indexOf("=== ");
+  const headerEnd = eventsStart > 0 ? content.indexOf("=== ", eventsStart + 1) : -1;
+  const headerPart = headerEnd > 0 ? content.slice(0, headerEnd) : "";
+  const eventsPart = headerEnd > 0 ? content.slice(headerEnd) : content;
+
+  const eventsBudget = budget - headerPart.length - 200;
+  if (eventsBudget <= 0) {
+    return { content: content.slice(0, budget) + "\n\n[...truncated]", truncated: true };
+  }
+  const tail = eventsPart.slice(-eventsBudget);
+  const firstNl = tail.indexOf("\n");
+  const trimmedTail = firstNl >= 0 ? tail.slice(firstNl + 1) : tail;
+  return {
+    content:
+      headerPart +
+      `[...older events trimmed to fit email — full content saved locally]\n\n` +
+      trimmedTail,
+    truncated: true,
+  };
 }

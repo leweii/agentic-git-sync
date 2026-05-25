@@ -81,16 +81,23 @@ export class EditSubmoduleModal extends Modal {
       });
     });
 
-    this.formField(body, "Upstream branch (optional)", (wrap) => {
-      // eslint-disable-next-line obsidianmd/ui/sentence-case -- "main" is a branch name, not UI prose
-      const input = wrap.createEl("input", { attr: { type: "text", placeholder: "main (leave empty to disable)" } });
-      input.value = this.upstreamBranch;
-      input.oninput = () => (this.upstreamBranch = input.value.trim());
-      wrap.createDiv({
-        cls: "ghs-es-hint",
-        text: "When set, every sync of this submodule merges in changes from this branch before pushing.",
+    // Upstream branch — team workflow only. In personal mode the field is
+    // hidden, but we still display the saved value as read-only context so a
+    // user who flips between modes doesn't silently lose a configured value.
+    if (this.plugin.settings.usageMode === "team") {
+      this.formField(body, "Upstream branch (optional)", (wrap) => {
+        // eslint-disable-next-line obsidianmd/ui/sentence-case -- "main" is a branch name, not UI prose
+        const input = wrap.createEl("input", { attr: { type: "text", placeholder: "main (leave empty to disable)" } });
+        input.value = this.upstreamBranch;
+        input.oninput = () => (this.upstreamBranch = input.value.trim());
+        wrap.createDiv({
+          cls: "ghs-es-hint",
+          text:
+            "When set, every sync of this submodule merges in changes from this branch before pushing. " +
+            "On conflict, the upstream side wins — local edits are kept in git history (reflog).",
+        });
       });
-    });
+    }
 
     this.formField(body, "Auto-sync", (wrap) => {
       const toggle = wrap.createEl("input", { attr: { type: "checkbox" } });

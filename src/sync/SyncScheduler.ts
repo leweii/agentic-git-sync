@@ -5,6 +5,7 @@ import { ensureRemoteHasCommits } from "../git/githubApi";
 import type { GitHubSyncSettings } from "../settings";
 import type { SyncProgress } from "../types";
 import { VAULT_REPO_ID } from "../types";
+import type { EventLog } from "../observability/EventLog";
 
 export type StatusListener = (id: string, progress: SyncProgress) => void;
 export type SyncCompleteListener = (
@@ -26,11 +27,20 @@ export class SyncScheduler {
   private completeListeners: SyncCompleteListener[] = [];
   private autoResolve: AutoResolveCallback | null = null;
   private betweenVaultAndSubsHook: (() => Promise<void>) | null = null;
+  /**
+   * Repos with unresolved content conflicts. Auto-scheduled (timer-driven)
+   * runs skip these so the user isn't spammed with the same conflict
+   * notification every cycle. Manual user-initiated runs bypass the block
+   * via the `force` flag. Block clears automatically on the next successful
+   * sync of that repo.
+   */
+  private blockedRepos = new Set<string>();
 
   constructor(
     private gitManager: GitManager,
     private submoduleManager: SubmoduleManager,
-    private getSettings: () => GitHubSyncSettings
+    private getSettings: () => GitHubSyncSettings,
+    private eventLog: EventLog | null = null,
   ) {}
 
   setAutoResolver(cb: AutoResolveCallback | null): void {
@@ -104,9 +114,23 @@ export class SyncScheduler {
     }
   }
 
-  async runVault(message?: string): Promise<void> {
+  /** Manually clear a repo's conflict block (e.g., after user resolves via the ConflictModal). */
+  unblock(repoId: string): void {
+    this.blockedRepos.delete(repoId);
+  }
+
+  /** True when auto-syncs are paused for this repo due to an unresolved conflict. */
+  isBlocked(repoId: string): boolean {
+    return this.blockedRepos.has(repoId);
+  }
+
+  async runVault(message?: string, opts: { force?: boolean } = {}): Promise<void> {
     const settings = this.getSettings();
     if (!settings.mainRepoUrl) return;
+
+    // Auto-scheduled runs skip blocked repos. Manual (force) runs bypass.
+    if (!opts.force && this.blockedRepos.has(VAULT_REPO_ID)) return;
+
     const branch = settings.mainRepoBranch || "main";
 
     this.emit(VAULT_REPO_ID, { phase: "checking" });
@@ -124,6 +148,8 @@ export class SyncScheduler {
         ignorePatterns: settings.ignorePatterns,
         onProgress: (p) => this.emit(VAULT_REPO_ID, p),
       });
+      this.blockedRepos.delete(VAULT_REPO_ID);
+      this.eventLog?.log({ kind: "sync_complete", repo: VAULT_REPO_ID, ok: true, count });
       this.emit(VAULT_REPO_ID, { phase: "synced" });
       this.emitComplete(VAULT_REPO_ID, { ok: true, count });
     } catch (e) {
@@ -131,6 +157,7 @@ export class SyncScheduler {
         try {
           const r = await this.autoResolve(VAULT_REPO_ID, e.conflicts);
           if (r.ok === true) {
+            this.blockedRepos.delete(VAULT_REPO_ID);
             this.emit(VAULT_REPO_ID, { phase: "synced" });
             this.emitComplete(VAULT_REPO_ID, { ok: true, count: r.count });
             return;
@@ -140,7 +167,19 @@ export class SyncScheduler {
         }
       }
 
+      // Conflict that wasn't auto-resolved → pause auto-scheduler for this
+      // repo. User must resolve via ConflictModal (or click sync manually)
+      // before another auto-run is attempted.
+      if (e instanceof GitConflictError) this.blockedRepos.add(VAULT_REPO_ID);
+
       const err = e as Error;
+      this.eventLog?.log({
+        kind: "sync_complete",
+        repo: VAULT_REPO_ID,
+        ok: false,
+        phase: e instanceof GitConflictError ? "conflict" : "error",
+        error: err.message?.slice(0, 500),
+      });
       this.emit(VAULT_REPO_ID, {
         phase: e instanceof GitConflictError ? "conflict" : "error",
         message: err.message,
@@ -150,9 +189,12 @@ export class SyncScheduler {
     }
   }
 
-  async runSubmodule(id: string, message?: string): Promise<void> {
+  async runSubmodule(id: string, message?: string, opts: { force?: boolean } = {}): Promise<void> {
     const sub = this.getSettings().submodules.find((s) => s.id === id);
     if (!sub) return;
+
+    if (!opts.force && this.blockedRepos.has(id)) return;
+
     this.emit(id, { phase: "checking" });
     try {
       // Same defensive auto-init as runVault — covers the case where the
@@ -161,6 +203,8 @@ export class SyncScheduler {
       await ensureRemoteHasCommits(sub.remoteUrl, this.getSettings().githubToken);
 
       const count = await this.submoduleManager.syncOne(sub, (p) => this.emit(id, p));
+      this.blockedRepos.delete(id);
+      this.eventLog?.log({ kind: "sync_complete", repo: id, ok: true, count });
       this.emit(id, { phase: "synced" });
       this.emitComplete(id, { ok: true, count });
     } catch (e) {
@@ -168,6 +212,7 @@ export class SyncScheduler {
         try {
           const r = await this.autoResolve(id, e.conflicts);
           if (r.ok === true) {
+            this.blockedRepos.delete(id);
             this.emit(id, { phase: "synced" });
             this.emitComplete(id, { ok: true, count: r.count });
             return;
@@ -177,7 +222,16 @@ export class SyncScheduler {
         }
       }
 
+      if (e instanceof GitConflictError) this.blockedRepos.add(id);
+
       const err = e as Error;
+      this.eventLog?.log({
+        kind: "sync_complete",
+        repo: id,
+        ok: false,
+        phase: e instanceof GitConflictError ? "conflict" : "error",
+        error: err.message?.slice(0, 500),
+      });
       this.emit(id, {
         phase: e instanceof GitConflictError ? "conflict" : "error",
         message: err.message,

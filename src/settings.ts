@@ -2,11 +2,17 @@ import { App, Modal, Notice, PluginSettingTab, Setting, requestUrl, setIcon } fr
 import type GitHubSyncPlugin from "./main";
 import type { SyncHistoryEntry } from "./types";
 import { L, setLang, tf, type Lang } from "./i18n";
-import { isValidGitHubUrl } from "./git/SubmoduleManager";
 import { checkRepoAccess, type GitHubUser } from "./git/githubApi";
+import { AddSubmoduleModal } from "./ui/AddSubmoduleModal";
 import { AIProviderSetupModal } from "./ui/AIProviderSetupModal";
 import { EditSubmoduleModal } from "./ui/EditSubmoduleModal";
 import { SetupWizard } from "./ui/SetupWizard";
+import type { AIProvider } from "./ai/AIProvider";
+import { testAIProvider } from "./ai/AIProvider";
+import { OpenAIProvider } from "./ai/OpenAIProvider";
+import { GeminiProvider } from "./ai/GeminiProvider";
+import { ClaudeProvider } from "./ai/ClaudeProvider";
+import { DeepSeekProvider } from "./ai/DeepSeekProvider";
 
 export interface SubmoduleConfig {
   id: string;
@@ -30,19 +36,35 @@ export interface AISettings {
   enabled: boolean;
   silentMode: boolean;
   silentMinConfidence: number;
-  deepseekToken: string;
-  deepseekModel: string;
+  // Order here reflects the UI / runtime preference order:
+  // OpenAI → Gemini → Claude → DeepSeek.
+  openaiToken: string;
+  openaiModel: string;
   geminiToken: string;
   geminiModel: string;
+  claudeToken: string;
+  claudeModel: string;
+  deepseekToken: string;
+  deepseekModel: string;
   sendFilePaths: boolean;
   sendGitMetadata: boolean;
   sendSurroundingContext: boolean;
   excludePatterns: string[];
 }
 
+/**
+ * Personal: solo user. Hides the per-submodule "upstream branch" field
+ * in modals — that's a team workflow (track a teammate's branch, absorb
+ * their changes).
+ * Team: shows upstream-branch UI so users on a personal branch can
+ * declare which shared branch (e.g., main) to keep merging in.
+ */
+export type UsageMode = "personal" | "team";
+
 export interface GitHubSyncSettings {
   setupComplete: boolean;
   language: Lang;
+  usageMode: UsageMode;
   syncOnStartup: boolean;
   autoSyncInterval: number;
   gitUser: string;
@@ -58,9 +80,53 @@ export interface GitHubSyncSettings {
   ai: AISettings;
 }
 
+/**
+ * Maps retired/sunset provider model names to their current
+ * replacements. Used by loadSettings() to silently upgrade saved
+ * `ai.*Model` values from older installs — since the model field
+ * has no UI yet, any saved value matching a previous default is
+ * "default-inherited, not explicit choice."
+ *
+ * Add a row here when bumping a default in DEFAULT_SETTINGS so
+ * existing data.json + .github-sync.json files migrate cleanly
+ * instead of leaving users with a 404 from the provider API.
+ */
+const STALE_MODEL_REPLACEMENTS: Record<string, string> = {
+  "gemini-1.5-flash":    "gemini-2.5-flash",
+  "gemini-1.5-flash-8b": "gemini-2.5-flash",
+  "gemini-2.0-flash":    "gemini-2.5-flash",
+  // `gemini-3-flash` was set as a default during development but the
+  // model never shipped under that public ID — installs that briefly
+  // ran with it now 404 on every probe. Roll forward to the real
+  // current-gen flash model.
+  "gemini-3-flash":      "gemini-2.5-flash",
+  "gpt-4o-mini":         "gpt-5.5",
+  "gpt-4.1-mini":        "gpt-5.5",
+  "gpt-4.1-nano":        "gpt-5.5",
+};
+
+export function migrateStaleModels(ai: AISettings): AISettings {
+  const replace = (v: string) => STALE_MODEL_REPLACEMENTS[v] ?? v;
+  // claudeModel may be missing on data.json files saved before 1.3.x — fall
+  // back to the default so loadSettings produces a usable AISettings shape.
+  const claudeModel = typeof ai.claudeModel === "string" && ai.claudeModel
+    ? ai.claudeModel
+    : "claude-sonnet-4-5";
+  const claudeToken = typeof ai.claudeToken === "string" ? ai.claudeToken : "";
+  return {
+    ...ai,
+    openaiModel: replace(ai.openaiModel),
+    geminiModel: replace(ai.geminiModel),
+    claudeToken,
+    claudeModel: replace(claudeModel),
+    deepseekModel: replace(ai.deepseekModel),
+  };
+}
+
 export const DEFAULT_SETTINGS: GitHubSyncSettings = {
   setupComplete: false,
   language: "en",
+  usageMode: "personal",
   syncOnStartup: true,
   autoSyncInterval: 30,
   gitUser: "",
@@ -82,10 +148,14 @@ export const DEFAULT_SETTINGS: GitHubSyncSettings = {
     enabled: true,
     silentMode: false,
     silentMinConfidence: 3,
+    openaiToken: "",
+    openaiModel: "gpt-5.5",
+    geminiToken: "",
+    geminiModel: "gemini-2.5-flash",
+    claudeToken: "",
+    claudeModel: "claude-sonnet-4-5",
     deepseekToken: "",
     deepseekModel: "deepseek-v4-flash",
-    geminiToken: "",
-    geminiModel: "gemini-1.5-flash",
     sendFilePaths: true,
     sendGitMetadata: true,
     sendSurroundingContext: true,
@@ -111,6 +181,24 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
     this.renderAccount(containerEl);
     this.renderAI(containerEl);
     this.renderGeneral(containerEl);
+    this.renderSaveBar(containerEl);
+  }
+
+  /**
+   * Page-level Save & close. Stands alone at the bottom — settings are
+   * already auto-saved on every change, so this button is just a visible
+   * "I'm done" affordance plus a shortcut to dismiss the modal.
+   */
+  private renderSaveBar(parent: HTMLElement): void {
+    const t = L().settings;
+    const bar = parent.createDiv("ghs-save-bar");
+    const btn = bar.createEl("button", { text: t.saveAndClose, cls: "mod-cta" });
+    btn.onclick = async () => {
+      await this.plugin.saveSettings();
+      new Notice(t.settingsSaved);
+      const setting = (this.app as unknown as { setting?: { close: () => void } }).setting;
+      setting?.close();
+    };
   }
 
   // ── Smart-sync hero (signature feature) ──────────────────────
@@ -118,7 +206,7 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
   private renderSilentHero(parent: HTMLElement): void {
     const t = L().settings;
     const ai = this.plugin.settings.ai;
-    const hasKey = !!(ai.deepseekToken || ai.geminiToken);
+    const hasKey = !!(ai.openaiToken || ai.geminiToken || ai.claudeToken || ai.deepseekToken);
 
     const hero = parent.createDiv("ghs-silent-hero");
     if (ai.silentMode) hero.addClass("is-active");
@@ -151,7 +239,7 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
     const handleToggle = async () => {
       const nextOn = toggleInput.checked;
       const a = this.plugin.settings.ai;
-      const currentHasKey = !!(a.deepseekToken || a.geminiToken);
+      const currentHasKey = !!(a.openaiToken || a.geminiToken || a.claudeToken || a.deepseekToken);
       if (nextOn && !currentHasKey) {
         // Revert visually until user finishes the setup modal
         toggleInput.checked = false;
@@ -194,6 +282,17 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       };
     }
+
+    // Setup wizard lives in the hero so a new user has a single
+    // jumping-off point: enable smart sync and/or run the guided
+    // token + repo connection flow without scrolling.
+    const action = hero.createDiv("ghs-silent-action");
+    action.createDiv({ cls: "ghs-silent-action-label", text: t.runSetupWizardDesc });
+    const wizardBtn = action.createEl("button", {
+      text: t.runSetupWizard,
+      cls: "mod-cta",
+    });
+    wizardBtn.onclick = () => new SetupWizard(this.app, this.plugin).open();
   }
 
   // ── 1. Repository ────────────────────────────────────────────
@@ -202,36 +301,20 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
     const t = L().settings;
     const card = this.sectionHeader(parent, t.sectionRepo);
 
-    // Prominent wizard launcher. The wizard used to auto-pop on every
-    // load; now it's strictly opt-in and lives here so users who want
-    // it can always find it.
-    new Setting(card)
-      .setName(t.runSetupWizard)
-      .setDesc(t.runSetupWizardDesc)
-      .addButton((b) =>
-        b.setButtonText(t.runSetupWizard).setCta().onClick(() => {
-          new SetupWizard(this.app, this.plugin).open();
-        })
-      );
-
     const s = this.plugin.settings;
-    let urlInputEl: HTMLInputElement | null = null;
-    let branchInputEl: HTMLInputElement | null = null;
-    const statusEl = createDiv("ghs-inline-badge ghs-repo-status");
-    statusEl.addClass("ghs-hidden");
 
-    const isValidUrl = (u: string) => isValidGitHubUrl(u.trim());
-
-    // Editable URL field.
+    // Editable URL field. Persists on each keystroke so the global Save
+    // button at the bottom is purely a "close" convenience, not the
+    // load-bearing persistence step.
     new Setting(card)
       .setName(t.repoUrlLabel)
       .setDesc(t.repoUrlDesc)
       .addText((tx) => {
-        urlInputEl = tx.inputEl;
         tx.setPlaceholder(t.repoUrlPlaceholder)
           .setValue(s.mainRepoUrl)
-          .onChange((v) => {
+          .onChange(async (v) => {
             this.plugin.settings.mainRepoUrl = v.trim();
+            await this.plugin.saveSettings();
           });
         tx.inputEl.addClass("ghs-token-input");
       });
@@ -240,11 +323,11 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
     new Setting(card)
       .setName(t.repoBranchLabel)
       .addText((tx) => {
-        branchInputEl = tx.inputEl;
         tx.setPlaceholder(t.repoBranchPlaceholder)
           .setValue(s.mainRepoBranch || "main")
-          .onChange((v) => {
+          .onChange(async (v) => {
             this.plugin.settings.mainRepoBranch = v.trim() || "main";
+            await this.plugin.saveSettings();
           });
       });
 
@@ -265,58 +348,106 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
           })
       );
 
-    // Connect / Save & sync button.
-    new Setting(card)
-      .setName("")
-      .addButton((b) => {
-        const initial = s.mainRepoUrl ? t.repoSaveAndSync : t.repoInitialize;
-        b.setButtonText(initial).setCta().onClick(async () => {
-          const url = urlInputEl?.value.trim() ?? "";
-          const branch = branchInputEl?.value.trim() || "main";
-          if (!url) { new Notice(t.repoUrlInvalid); return; }
-          if (!isValidUrl(url)) { new Notice(t.repoUrlInvalid); return; }
-
-          b.setDisabled(true);
-          b.setButtonText(t.repoConnecting);
-          this.showRepoStatus(statusEl, "loading", t.repoConnecting);
-
-          try {
-            await this.plugin.connectMainRepo(url, branch);
-            this.showRepoStatus(statusEl, "valid", t.repoConnected);
-            b.setDisabled(false);
-            b.setButtonText(t.repoSaveAndSync);
-          } catch (e) {
-            this.showRepoStatus(statusEl, "invalid", tf(t.repoConnectFailed, (e as Error).message));
-            b.setDisabled(false);
-            b.setButtonText(initial);
-          }
-        });
-      });
-    card.appendChild(statusEl);
-
     // Submodules list — its own card, separate from the connected-repo card.
-    if (s.submodules.length > 0) {
-      const subsCard = this.sectionHeader(parent, t.repoSubmodules, { count: s.submodules.length });
-      for (const sub of s.submodules) {
-        const desc = sub.upstreamBranch
-          ? `${sub.remoteUrl} · ${sub.branch} ← ${sub.upstreamBranch}`
-          : `${sub.remoteUrl} · ${sub.branch}`;
-        new Setting(subsCard)
-          .setName(sub.localPath)
-          .setDesc(desc)
-          .addExtraButton((b) =>
-            b.setIcon("pencil")
-              .setTooltip("Edit submodule")
-              .onClick(() => {
-                new EditSubmoduleModal(this.app, this.plugin, sub).open();
-              })
-          )
-          .addExtraButton((b) =>
-            b.setIcon("trash-2")
-              .setTooltip("Remove submodule")
-              .onClick(() => this.confirmRemoveSubmodule(sub.id, sub.localPath))
-          );
-      }
+    // Always shown so the Add button is reachable even when the list is empty.
+    const subsCard = this.sectionHeader(parent, t.repoSubmodules, { count: s.submodules.length });
+    for (const sub of s.submodules) {
+      const desc = sub.upstreamBranch
+        ? `${sub.remoteUrl} · ${sub.branch} ← ${sub.upstreamBranch}`
+        : `${sub.remoteUrl} · ${sub.branch}`;
+      // Held outside `new Setting()` so the per-submodule diagnostic
+      // rows render under the row, not inline with the buttons.
+      const subStatusEl = createDiv("ghs-diag-container ghs-submodule-status");
+      subStatusEl.addClass("ghs-hidden");
+      new Setting(subsCard)
+        .setName(sub.localPath)
+        .setDesc(desc)
+        .addExtraButton((b) =>
+          b.setIcon("plug-zap")
+            .setTooltip("Test connection")
+            .onClick(() => this.testSingleSubmodule(sub, subStatusEl))
+        )
+        .addExtraButton((b) =>
+          b.setIcon("pencil")
+            .setTooltip("Edit submodule")
+            .onClick(() => {
+              new EditSubmoduleModal(this.app, this.plugin, sub).open();
+            })
+        )
+        .addExtraButton((b) =>
+          b.setIcon("trash-2")
+            .setTooltip("Remove submodule")
+            .onClick(() => this.confirmRemoveSubmodule(sub.id, sub.localPath))
+        );
+      subsCard.appendChild(subStatusEl);
+    }
+    new Setting(subsCard)
+      .addButton((b) =>
+        b.setCta()
+          .setIcon("plus")
+          .setButtonText(L().dashboard.addRepository)
+          .onClick(() => new AddSubmoduleModal(this.app, this.plugin).open())
+      );
+  }
+
+  /**
+   * Run the same two-step check as the global Test connection button
+   * (GitHub API repo access + `git ls-remote` through the real auth
+   * path) but scoped to one submodule. Used after AddSubmoduleModal
+   * persists a config whose clone failed: the user clicks here to see
+   * *why* — token unset, SSO block, missing org grant, etc. — without
+   * having to re-test every other repo.
+   */
+  private async testSingleSubmodule(
+    sub: SubmoduleConfig,
+    container: HTMLElement,
+  ): Promise<void> {
+    const t = L().settings;
+    container.empty();
+    container.removeClass("ghs-hidden");
+
+    const token = this.plugin.settings.githubToken;
+    if (!token) {
+      this.addDiagRow(container, t.testNoToken, "error");
+      return;
+    }
+
+    const apiRow = this.addDiagRow(
+      container,
+      `${sub.localPath} — checking repo access…`,
+      "loading",
+    );
+    const access = await checkRepoAccess(sub.remoteUrl, token);
+    if (!access.ok) {
+      this.setDiagRow(
+        apiRow,
+        `${sub.localPath} — ${access.reason} (HTTP ${access.status})`,
+        "error",
+      );
+      return;
+    }
+    const pushTag = access.canPush ? "read+write" : "read only";
+    const emptyTag = access.isEmpty ? ", empty (will auto-init)" : "";
+    this.setDiagRow(
+      apiRow,
+      `${sub.localPath} — ${access.fullName} (${pushTag}${emptyTag})`,
+      "success",
+    );
+
+    const gitRow = this.addDiagRow(
+      container,
+      `${sub.localPath} — testing git auth…`,
+      "loading",
+    );
+    const ls = await this.plugin.gitManager.testRemote(sub.remoteUrl);
+    if (ls.ok) {
+      this.setDiagRow(gitRow, `${sub.localPath} — git auth OK`, "success");
+    } else {
+      this.setDiagRow(
+        gitRow,
+        `${sub.localPath} — git auth failed: ${ls.message}`,
+        "error",
+      );
     }
   }
 
@@ -352,18 +483,6 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
     modal.open();
   }
 
-  private showRepoStatus(badge: HTMLElement, kind: "loading" | "valid" | "invalid", text: string): void {
-    badge.empty();
-    badge.removeClass("ghs-hidden");
-    badge.removeClass("loading", "valid", "invalid");
-    badge.addClass(kind);
-    setIcon(
-      badge.createSpan(),
-      kind === "loading" ? "loader-2" : kind === "valid" ? "check-circle" : "alert-circle"
-    );
-    badge.createSpan({ text });
-  }
-
   // ── 2. Account (token + identity) ────────────────────────────
 
   private renderAccount(parent: HTMLElement): void {
@@ -374,7 +493,7 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
     const testBadge = createDiv("ghs-inline-badge ghs-test-badge");
     testBadge.addClass("ghs-hidden");
 
-    new Setting(card)
+    const tokenSetting = new Setting(card)
       .setName(t.tokenLabel)
       .addExtraButton((b) =>
         b.setIcon("help-circle").setTooltip(t.tokenHelp).onClick(() => {
@@ -399,9 +518,12 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
             this.plugin.reinitGit();
           });
       })
-      .addButton((b) =>
-        b.setButtonText(L().common.test).onClick(() => this.testConnection(testBadge))
+      .addExtraButton((b) =>
+        b.setIcon("plug-zap")
+          .setTooltip(L().common.test)
+          .onClick(() => this.testConnection(testBadge))
       );
+    tokenSetting.settingEl.addClass("ghs-key-row");
     card.appendChild(testBadge);
 
     new Setting(card)
@@ -437,49 +559,126 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
     const t = L().settings;
     const card = this.sectionHeader(parent, t.sectionAI);
 
-    let dsInputEl: HTMLInputElement | null = null;
-    new Setting(card)
-      .setName(t.deepseekLabel)
-      .addExtraButton((b) =>
-        b.setIcon("eye").setTooltip(t.tokenShowHide).onClick(() => {
-          if (!dsInputEl) return;
-          dsInputEl.type = dsInputEl.type === "password" ? "text" : "password";
-        })
-      )
-      .addText((text) => {
-        dsInputEl = text.inputEl;
-        text.inputEl.type = "password";
-        text
-          // eslint-disable-next-line obsidianmd/ui/sentence-case -- "sk-" is the DeepSeek token prefix
-          .setPlaceholder("sk-…")
-          .setValue(this.plugin.settings.ai.deepseekToken)
-          .onChange(async (v) => {
-            this.plugin.settings.ai.deepseekToken = v.trim();
-            await this.plugin.saveSettings();
-          });
-      });
+    this.renderAIProviderRow(card, {
+      label: t.openaiLabel,
+      // eslint-disable-next-line obsidianmd/ui/sentence-case -- "sk-" is the OpenAI token prefix
+      placeholder: "sk-…",
+      getToken: () => this.plugin.settings.ai.openaiToken,
+      setToken: (v) => { this.plugin.settings.ai.openaiToken = v; },
+      buildProvider: () =>
+        new OpenAIProvider({
+          token: this.plugin.settings.ai.openaiToken,
+          model: this.plugin.settings.ai.openaiModel,
+        }),
+    });
 
-    let gmInputEl: HTMLInputElement | null = null;
-    new Setting(card)
-      .setName(t.geminiLabel)
+    this.renderAIProviderRow(card, {
+      label: t.geminiLabel,
+      // eslint-disable-next-line obsidianmd/ui/sentence-case -- "AIza" is the Gemini key prefix
+      placeholder: "AIza…",
+      getToken: () => this.plugin.settings.ai.geminiToken,
+      setToken: (v) => { this.plugin.settings.ai.geminiToken = v; },
+      buildProvider: () =>
+        new GeminiProvider({
+          token: this.plugin.settings.ai.geminiToken,
+          model: this.plugin.settings.ai.geminiModel,
+        }),
+    });
+
+    this.renderAIProviderRow(card, {
+      label: t.claudeLabel,
+      // eslint-disable-next-line obsidianmd/ui/sentence-case -- "sk-ant-" is the Anthropic key prefix
+      placeholder: "sk-ant-…",
+      getToken: () => this.plugin.settings.ai.claudeToken,
+      setToken: (v) => { this.plugin.settings.ai.claudeToken = v; },
+      buildProvider: () =>
+        new ClaudeProvider({
+          token: this.plugin.settings.ai.claudeToken,
+          model: this.plugin.settings.ai.claudeModel,
+        }),
+    });
+
+    this.renderAIProviderRow(card, {
+      label: t.deepseekLabel,
+      // eslint-disable-next-line obsidianmd/ui/sentence-case -- "sk-" is the DeepSeek token prefix
+      placeholder: "sk-…",
+      getToken: () => this.plugin.settings.ai.deepseekToken,
+      setToken: (v) => { this.plugin.settings.ai.deepseekToken = v; },
+      buildProvider: () =>
+        new DeepSeekProvider({
+          token: this.plugin.settings.ai.deepseekToken,
+          model: this.plugin.settings.ai.deepseekModel,
+        }),
+    });
+  }
+
+  /**
+   * Render one AI provider row: eye toggle, password input, Test button.
+   * The status badge below holds the test result so the user can see
+   * which provider's check passed/failed without a Notice toast disappearing.
+   */
+  private renderAIProviderRow(
+    card: HTMLElement,
+    opts: {
+      label: string;
+      placeholder: string;
+      getToken: () => string;
+      setToken: (v: string) => void;
+      buildProvider: () => AIProvider;
+    },
+  ): void {
+    const t = L().settings;
+    let inputEl: HTMLInputElement | null = null;
+    const badge = createDiv("ghs-inline-badge ghs-ai-test-badge");
+    badge.addClass("ghs-hidden");
+
+    const keySetting = new Setting(card)
+      .setName(opts.label)
       .addExtraButton((b) =>
         b.setIcon("eye").setTooltip(t.tokenShowHide).onClick(() => {
-          if (!gmInputEl) return;
-          gmInputEl.type = gmInputEl.type === "password" ? "text" : "password";
+          if (!inputEl) return;
+          inputEl.type = inputEl.type === "password" ? "text" : "password";
         })
       )
       .addText((text) => {
-        gmInputEl = text.inputEl;
+        inputEl = text.inputEl;
         text.inputEl.type = "password";
         text
-          // eslint-disable-next-line obsidianmd/ui/sentence-case -- "AIza" is the Gemini key prefix
-          .setPlaceholder("AIza…")
-          .setValue(this.plugin.settings.ai.geminiToken)
+          .setPlaceholder(opts.placeholder)
+          .setValue(opts.getToken())
           .onChange(async (v) => {
-            this.plugin.settings.ai.geminiToken = v.trim();
+            opts.setToken(v.trim());
             await this.plugin.saveSettings();
+            // Stale badge from a previous test would be misleading now.
+            badge.empty();
+            badge.addClass("ghs-hidden");
           });
-      });
+      })
+      .addExtraButton((b) =>
+        b.setIcon("plug-zap")
+          .setTooltip(L().common.test)
+          .onClick(() => this.runAITest(opts.buildProvider, badge))
+      );
+    keySetting.settingEl.addClass("ghs-key-row");
+    card.appendChild(badge);
+  }
+
+  private async runAITest(
+    buildProvider: () => AIProvider,
+    badge: HTMLElement,
+  ): Promise<void> {
+    badge.empty();
+    badge.removeClass("ghs-hidden", "valid", "invalid", "loading");
+    badge.addClass("loading");
+    setIcon(badge.createSpan(), "loader-2");
+    badge.createSpan({ text: L().settings.testVerifying });
+
+    const result = await testAIProvider(buildProvider());
+    badge.empty();
+    badge.removeClass("loading", "valid", "invalid");
+    badge.addClass(result.ok ? "valid" : "invalid");
+    setIcon(badge.createSpan(), result.ok ? "check-circle" : "alert-circle");
+    badge.createSpan({ text: result.ok ? "OK" : `Failed: ${result.message}` });
   }
 
   // ── 4. General (language + tools) ────────────────────────────
@@ -489,11 +688,28 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
     const card = this.sectionHeader(parent, t.sectionGeneral);
 
     new Setting(card)
+      .setName(t.sectionUsageMode)
+      .setDesc(t.usageModeDesc)
+      .addDropdown((dd) =>
+        dd
+          .addOption("personal", t.usageModePersonal)
+          .addOption("team", t.usageModeTeam)
+          .setValue(this.plugin.settings.usageMode ?? "personal")
+          .onChange(async (v) => {
+            this.plugin.settings.usageMode = v as "personal" | "team";
+            await this.plugin.saveSettings();
+            this.display();
+          })
+      );
+
+    new Setting(card)
       .setName(t.sectionLanguage)
       .addDropdown((dd) =>
         dd
           .addOption("en", t.languageEn)
           .addOption("zh", t.languageZh)
+          .addOption("zh-tw", t.languageZhTw)
+          .addOption("ja", t.languageJa)
           .setValue(this.plugin.settings.language ?? "en")
           .onChange(async (v) => {
             this.plugin.settings.language = v as Lang;
@@ -501,6 +717,53 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
             this.display();
           })
+      );
+
+    // Order is intentional: most-frequently-used at the top, destructive at
+    // the bottom. Language and event log are everyday tools; clear history
+    // is occasional; reset is the nuclear option.
+    new Setting(card)
+      .setName(t.eventLog)
+      .setDesc(t.eventLogDesc)
+      .addButton((b) =>
+        b.setButtonText(t.openLogFolder).onClick(() => {
+          const dir = this.plugin.eventLog?.directory;
+          if (!dir) {
+            new Notice(t.eventLogNotReady);
+            return;
+          }
+          const req = (window as unknown as { require?: (m: string) => unknown }).require;
+          if (req) {
+            try {
+              const electron = req("electron") as { shell?: { openPath?: (p: string) => void } };
+              electron?.shell?.openPath?.(dir);
+              return;
+            } catch { /* fall through to clipboard */ }
+          }
+          navigator.clipboard?.writeText(dir).catch(() => {});
+          new Notice(tf(t.logFolderCopied, dir), 6000);
+        })
+      )
+      .addButton((b) =>
+        b.setButtonText(t.reportBug).setCta().onClick(async () => {
+          const result = await this.plugin.openBugReportEmail();
+          if (!result.ok) {
+            if (result.filePath) navigator.clipboard?.writeText(result.filePath).catch(() => {});
+            new Notice(
+              result.filePath
+                ? tf(t.bugReportNoMail, result.filePath)
+                : tf(t.bugReportNoFile, result.error ?? "unknown error"),
+              15000,
+            );
+            return;
+          }
+          new Notice(
+            result.truncated
+              ? tf(t.bugReportTruncated, result.filePath)
+              : t.bugReportOpened,
+            8000,
+          );
+        })
       );
 
     new Setting(card)
@@ -512,6 +775,81 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
           new Notice(t.historyCleared);
         })
       );
+
+    new Setting(card)
+      .setName(t.resetPlugin)
+      .setDesc(t.resetPluginDesc)
+      .addButton((b) =>
+        b.setButtonText(t.resetButton).setWarning().onClick(() => this.confirmResetPlugin())
+      );
+  }
+
+  /**
+   * Two-step destructive confirmation. The user must type RESET before the
+   * action button enables — this is the equivalent of `rm -rf` for the
+   * plugin's git state, and a misclick would force the user to manually
+   * reconnect every repo.
+   */
+  private confirmResetPlugin(): void {
+    const plugin = this.plugin;
+    const refresh = () => this.display();
+    const subCount = plugin.settings.submodules.length;
+
+    const t = L().settings;
+    const modal = new (class extends Modal {
+      onOpen(): void {
+        const { contentEl } = this;
+        contentEl.createEl("h3", { text: t.resetModalTitle });
+        const intro = contentEl.createEl("p", { cls: "ghs-confirm-desc" });
+        intro.createSpan({ text: t.resetModalIntro });
+        const list = contentEl.createEl("ul");
+        list.createEl("li", { text: t.resetModalEraseSettings });
+        list.createEl("li", { text: t.resetModalRenameGit });
+        if (subCount > 0) {
+          list.createEl("li", {
+            text: subCount === 1
+              ? t.resetModalRenameSubsOne
+              : tf(t.resetModalRenameSubsMany, subCount),
+          });
+        }
+        list.createEl("li", { text: t.resetModalDeleteConfig });
+        contentEl.createEl("p", { text: t.resetModalNotesNotice, cls: "ghs-confirm-desc" });
+        contentEl.createEl("p", { text: t.resetModalDisableEnable, cls: "ghs-confirm-desc" });
+
+        const typedHint = contentEl.createEl("p", { cls: "ghs-confirm-desc" });
+        typedHint.createSpan({ text: t.resetModalTypeToConfirm });
+        typedHint.createEl("code", { text: "RESET" });
+        typedHint.createSpan({ text: t.resetModalTypeToConfirmAfter });
+
+        const input = contentEl.createEl("input", { type: "text", cls: "ghs-confirm-input" });
+        input.placeholder = "RESET";
+
+        const actions = contentEl.createDiv("ghs-confirm-actions");
+        const cancel = actions.createEl("button", { text: t.resetModalCancel });
+        cancel.onclick = () => this.close();
+        const confirm = actions.createEl("button", { text: t.resetModalConfirm, cls: "mod-warning" });
+        confirm.setAttribute("disabled", "true");
+        input.oninput = () => {
+          if (input.value.trim() === "RESET") confirm.removeAttribute("disabled");
+          else confirm.setAttribute("disabled", "true");
+        };
+        confirm.onclick = async () => {
+          confirm.setAttribute("disabled", "true");
+          try {
+            const result = await plugin.resetEverything();
+            this.close();
+            new Notice(tf(t.resetCompleteNotice, result.backupPaths.length), 8000);
+            refresh();
+          } catch (e) {
+            confirm.removeAttribute("disabled");
+            new Notice(tf(t.resetFailedNotice, (e as Error).message));
+          }
+        };
+        setTimeout(() => input.focus(), 0);
+      }
+      onClose(): void { this.contentEl.empty(); }
+    })(this.app);
+    modal.open();
   }
 
   // ── Helpers ──────────────────────────────────────────────────

@@ -24,8 +24,21 @@ export function friendlyError(raw: string): string {
   if (m.includes("would be overwritten by merge") || m.includes("would be overwritten by checkout")) {
     return "Local changes block the pull. Sync again — changes will be committed first.";
   }
-  if (m.includes("conflict") || m.includes("merge")) {
+  // True content conflict — GitConflictError carries "Merge conflict in N file(s)"
+  // and raw git output contains "CONFLICT (" / "conflict in". Only these patterns
+  // get the "Click Resolve" hint, since only they actually surface a Resolve
+  // button on the dashboard card.
+  if (
+    /merge conflict in \d+ file/i.test(raw) ||
+    /^CONFLICT \(/m.test(raw) ||
+    m.includes("automatic merge failed")
+  ) {
     return "Merge conflict. Click Resolve to choose which version to keep.";
+  }
+  // Other merge-state errors (mid-merge blocking next pull, etc.) — no Resolve
+  // button applies, so don't promise one. Surface the raw text trimmed.
+  if (m.includes("merge") || m.includes("unmerged")) {
+    return raw.replace(/^error:\s*/i, "").replace(/^fatal:\s*/i, "").trim();
   }
   if (m.includes("non-fast-forward") || m.includes("rejected")) {
     return "Remote has newer commits. Pull first or resolve divergence.";

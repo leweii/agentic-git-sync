@@ -3,6 +3,8 @@ import { fs, path, type Dirent } from "../node-builtins";
 import type { PendingChanges, SyncProgress } from "../types";
 import type { AIProvider } from "../ai/AIProvider";
 import { GitErrorAgent } from "./GitErrorAgent";
+import type { EventLog } from "../observability/EventLog";
+import { wrapGitWithLogging } from "./loggedGit";
 
 // Direct `fs` use in this file is intentional and unavoidable. Every
 // path passed to `fs` is rooted at `this.vaultPath` and addresses either
@@ -31,8 +33,27 @@ export interface SyncOptions {
 }
 
 export class GitConflictError extends Error {
-  constructor(public conflicts: string[]) {
-    super(`Merge conflict in ${conflicts.length} file(s)`);
+  /**
+   * `preExisting` distinguishes a conflict that was already on disk
+   * when the caller asked for a new merge (so the user just needs to
+   * finish what they started) from one freshly produced by the merge
+   * they just triggered.
+   *
+   * `rawError` carries the original git stderr — needed for the agent
+   * to tell apart structural conflicts (modify/delete, add/add,
+   * rename) which it CAN resolve via git_exec, versus content
+   * conflicts which it must defer to the ConflictModal.
+   */
+  constructor(
+    public conflicts: string[],
+    public preExisting = false,
+    public rawError?: string,
+  ) {
+    super(
+      rawError
+        ? `Merge conflict in ${conflicts.length} file(s). ${rawError.slice(0, 600)}`
+        : `Merge conflict in ${conflicts.length} file(s)`,
+    );
     this.name = "GitConflictError";
   }
 }
@@ -46,6 +67,7 @@ export class GitManager {
   private token: string;
   private configDir: string;
   private errorAgent: GitErrorAgent;
+  private eventLog: EventLog | null;
   /**
    * Resolves once configureGit() has finished writing the token-bearing
    * `insteadOf` rule + HTTP tuning. Any method that actually talks to
@@ -66,15 +88,20 @@ export class GitManager {
     email: string,
     token: string,
     configDir: string,
-    providers: AIProvider[] = []
+    providers: AIProvider[] = [],
+    eventLog: EventLog | null = null,
+    /** Repo id used in event-log entries — VAULT_REPO_ID for main, submodule id otherwise. */
+    repoId = "main",
   ) {
     this.vaultPath = vaultPath;
     this.user = user;
     this.email = email;
     this.token = token;
     this.configDir = configDir;
-    this.git = simpleGit(vaultPath);
-    this.errorAgent = new GitErrorAgent(this.git, vaultPath, providers);
+    this.eventLog = eventLog;
+    const rawGit = simpleGit(vaultPath);
+    this.git = eventLog ? wrapGitWithLogging(rawGit, eventLog, repoId) : rawGit;
+    this.errorAgent = new GitErrorAgent(this.git, vaultPath, providers, eventLog, repoId);
     this.ready = this.configureGit().catch(() => { /* configureGit is best-effort */ });
   }
 
@@ -282,7 +309,29 @@ export class GitManager {
   }
 
   async abortMerge(): Promise<void> {
+    // Try the normal abort first. If git refuses (e.g. MERGE_HEAD was deleted
+    // manually but the index still has unmerged stages), force-clean every
+    // marker file and reset the index so the next commit isn't blocked by
+    // stale `U` entries from an interrupted merge.
     await this.git.raw(["merge", "--abort"]).catch(() => {});
+
+    const gitDir = this.resolveGitDir();
+    if (gitDir) {
+      for (const name of ["MERGE_HEAD", "MERGE_MSG", "MERGE_MODE", "CHERRY_PICK_HEAD"]) {
+        try { fs.unlinkSync(path.join(gitDir, name)); } catch { /* absent — ok */ }
+      }
+    }
+
+    // If any paths are still in unmerged state (index has stage > 0), reset
+    // them to HEAD so `git commit` won't fail with "unmerged files". Working
+    // tree files are left as-is — user content is preserved.
+    try {
+      const unmerged = await this.git.raw(["diff", "--name-only", "--diff-filter=U"]);
+      const paths = unmerged.split("\n").map((s) => s.trim()).filter(Boolean);
+      if (paths.length > 0) {
+        await this.git.raw(["reset", "HEAD", "--", ...paths]).catch(() => {});
+      }
+    } catch { /* best-effort */ }
   }
 
   async pull(branch = "main", onProgress?: ProgressFn): Promise<void> {
@@ -306,7 +355,7 @@ export class GitManager {
         return;
       }
       const conflicts = (await this.git.status()).conflicted;
-      if (conflicts.length > 0) throw new GitConflictError(conflicts);
+      if (conflicts.length > 0) throw new GitConflictError(conflicts, false, msg);
       throw e;
     }
   }
@@ -317,10 +366,12 @@ export class GitManager {
    * content files genuinely conflict.
    */
   private async pullWithAutoResolve(branch: string): Promise<void> {
+    let rawErr = "";
     try {
       await this.git.pull("origin", branch, { "--rebase": "false", "--allow-unrelated-histories": null });
     } catch (e) {
       const msg = (e as Error).message ?? "";
+      rawErr = msg;
       if (!msg.includes("Automatic merge failed") && !msg.includes("CONFLICT")) throw e;
       // "Automatic merge failed" → conflicts on disk, handled below
     }
@@ -328,7 +379,7 @@ export class GitManager {
     // Auto-resolve system files and clean up file/directory residuals.
     const conflicts = (await this.git.status()).conflicted;
     const userConflicts = await this.autoResolveSystemFiles(conflicts);
-    if (userConflicts.length > 0) throw new GitConflictError(userConflicts);
+    if (userConflicts.length > 0) throw new GitConflictError(userConflicts, false, rawErr);
 
     // If MERGE_HEAD still exists (auto-resolved staged files not yet committed),
     // finalise the merge commit now so the repo is in a clean state.
@@ -552,9 +603,14 @@ export class GitManager {
       try {
         return await this._doSync(opts);
       } catch (e) {
-        if (e instanceof GitConflictError) throw e;
         if (attempt >= MAX_RECOVERY_ATTEMPTS) throw e;
-        const recovered = await this.errorAgent.tryRecover(e as Error, "sync", branch);
+        // Previously GitConflictError bypassed the agent — the carve-out was
+        // dead code because the agent can now handle STRUCTURAL conflicts
+        // (modify/delete, add/add, rename) via git_exec. Content conflicts
+        // are still surfaced: the agent's prompt knows to finish give_up on
+        // "CONFLICT (content):" and the rethrow below routes them to the
+        // ConflictModal via SyncScheduler's autoResolve.
+        const recovered = await this.errorAgent.tryRecover(e as Error, "sync", branch, opts.remoteUrl);
         if (!recovered) throw e;
         // recovered — loop and retry _doSync with a clean state
       }
@@ -588,6 +644,7 @@ export class GitManager {
       // • "Automatic merge failed" means conflicts — handle them below.
       // • Any other error (no remote ref, etc.) means remote is empty — skip.
       let remoteHasCommits = false;
+      let initPullErr = "";
       try {
         await this.git.pull("origin", branch, { "--rebase": "false", "--allow-unrelated-histories": null });
         remoteHasCommits = true;
@@ -595,6 +652,7 @@ export class GitManager {
         const msg = (e as Error).message ?? "";
         if (msg.includes("Automatic merge failed") || msg.includes("CONFLICT")) {
           remoteHasCommits = true; // pull left conflict state on disk
+          initPullErr = msg;
         }
         // else: remote is empty or unreachable — push below creates the branch
       }
@@ -603,7 +661,7 @@ export class GitManager {
         // Resolve any conflicts left by the pull.
         const conflicts = (await this.git.status()).conflicted;
         const userConflicts = await this.autoResolveSystemFiles(conflicts);
-        if (userConflicts.length > 0) throw new GitConflictError(userConflicts);
+        if (userConflicts.length > 0) throw new GitConflictError(userConflicts, false, initPullErr);
         // If MERGE_HEAD still exists (all conflicts auto-resolved but not yet
         // committed), finalise the merge commit now.
         if (this.isMidMerge()) {
@@ -645,11 +703,13 @@ export class GitManager {
 
     // Optionally merge in an "upstream" branch — used for the submodule
     // workflow where a feature branch wants to absorb changes that have
-    // landed on the team's main branch. We do this BEFORE staging
-    // auto-resolved files so any merge conflicts can be auto-resolved
-    // alongside the pull-time conflicts in the same commit.
+    // landed on the team's main branch. The user has declared this branch
+    // authoritative by setting it as upstreamBranch, so any conflict during
+    // this merge auto-resolves in favour of the upstream side — no
+    // ConflictModal interruption. The local (pre-merge) content is still
+    // recoverable via git reflog and the merge commit's first parent.
     if (opts.upstreamBranch && opts.upstreamBranch !== branch) {
-      await this.mergeFromBranch(opts.upstreamBranch, opts.onProgress);
+      await this.mergeFromBranch(opts.upstreamBranch, opts.onProgress, true);
     }
 
     // Commit any auto-resolved merge files, then push everything.
@@ -671,11 +731,44 @@ export class GitManager {
    *
    * Safe to call even if `sourceBranch` is the same as the current
    * branch: returns 0 without doing anything.
+   *
+   * `autoTakeTheirs`: when true, any remaining user-content conflicts
+   * are resolved by taking the upstream (source-branch) side without
+   * surfacing a ConflictModal. Use this for the auto-sync "absorb from
+   * upstream" workflow declared via SubmoduleConfig.upstreamBranch —
+   * the user has explicitly nominated this branch as authoritative.
+   * Overwritten local content is recoverable via `git reflog` + the
+   * merge commit's first parent.
    */
-  async mergeFromBranch(sourceBranch: string, onProgress?: ProgressFn): Promise<number> {
+  async mergeFromBranch(
+    sourceBranch: string,
+    onProgress?: ProgressFn,
+    autoTakeTheirs = false,
+  ): Promise<number> {
     await this.ready;
     const current = await this.git.revparse(["--abbrev-ref", "HEAD"]).then((s) => s.trim()).catch(() => "");
     if (!sourceBranch || sourceBranch === current) return 0;
+
+    // git refuses to start a new merge while a previous one is still
+    // unresolved ("Merging is not possible because you have unmerged
+    // files"). Surface that as a recognized GitConflictError carrying
+    // the existing file list — preExisting=true so the caller can tell
+    // the user to finish the open conflict instead of "this merge
+    // produced conflicts."
+    if (this.isMidMerge()) {
+      const stillConflicted = (await this.git.status()).conflicted;
+      if (stillConflicted.length > 0) {
+        throw new GitConflictError(stillConflicted, true);
+      }
+      // Everything staged but not committed (deferred from ConflictModal's
+      // "next sync will commit") — finalise before starting the new merge.
+      onProgress?.({ phase: "committing", message: "Committing resolved merge…" });
+      await this.git.commit("chore: commit resolved merge");
+    }
+    const lingering = await this.listConflicts();
+    if (lingering.length > 0) {
+      throw new GitConflictError(lingering, true);
+    }
 
     onProgress?.({ phase: "pulling", message: `Merging origin/${sourceBranch}` });
 
@@ -708,32 +801,34 @@ export class GitManager {
 
     const conflicts = (await this.git.status()).conflicted;
     const userConflicts = await this.autoResolveSystemFiles(conflicts);
-    if (userConflicts.length > 0) throw new GitConflictError(userConflicts);
+    if (userConflicts.length > 0) {
+      if (!autoTakeTheirs) {
+        throw new GitConflictError(userConflicts);
+      }
+      // upstreamBranch policy: nominated branch wins. Take its side for every
+      // remaining conflict. `git checkout --theirs` fails on conflicts that
+      // involve add/add or rename — for those we fall back to manually
+      // staging the index version + adding, but if anything throws we keep
+      // going so a single weird file doesn't block the rest of the merge.
+      for (const file of userConflicts) {
+        try {
+          await this.resolveConflict(file, "theirs");
+        } catch (err) {
+          console.warn(`[github-sync] couldn't auto-take theirs for ${file}:`, (err as Error).message);
+        }
+      }
+    }
 
-    // All conflicts auto-resolved — finalise the merge commit if needed.
+    // All conflicts resolved — finalise the merge commit if needed.
     if (this.isMidMerge()) {
-      await this.git.commit(`chore: merge origin/${sourceBranch} (auto-resolved system files)`);
+      const msg = userConflicts.length > 0 && autoTakeTheirs
+        ? `chore: merge origin/${sourceBranch} (took upstream on conflicts)`
+        : `chore: merge origin/${sourceBranch} (auto-resolved system files)`;
+      await this.git.commit(msg);
     }
     return 1;
   }
 
-  /**
-   * Public one-shot "merge then push" entry point used by the manual
-   * "Pull from..." dashboard action. Performs the merge in-process
-   * (delegating to mergeFromBranch) and then pushes the current branch
-   * upstream so the merged result lands remotely without waiting for
-   * the next regular sync.
-   */
-  async mergeAndPushFromBranch(
-    currentBranch: string,
-    sourceBranch: string,
-    onProgress?: ProgressFn
-  ): Promise<void> {
-    await this.ready;
-    await this.mergeFromBranch(sourceBranch, onProgress);
-    onProgress?.({ phase: "pushing", message: `Pushing to origin/${currentBranch}` });
-    await this.runWithRetry(["push", "--set-upstream", "origin", currentBranch], 3, onProgress);
-  }
 }
 
 // Minimal glob-ish match: supports * and trailing /** style patterns.

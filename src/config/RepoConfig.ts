@@ -29,8 +29,10 @@ export interface RepoConfigV1 {
     enabled: boolean;
     silentMode: boolean;
     silentMinConfidence: number;
-    deepseekModel: string;
+    openaiModel: string;
     geminiModel: string;
+    claudeModel: string;
+    deepseekModel: string;
     sendFilePaths: boolean;
     sendGitMetadata: boolean;
     sendSurroundingContext: boolean;
@@ -64,8 +66,10 @@ export function parseRepoConfig(raw: unknown): RepoConfigV1 | null {
       silentMode: typeof ai.silentMode === "boolean" ? ai.silentMode : false,
       silentMinConfidence:
         typeof ai.silentMinConfidence === "number" ? ai.silentMinConfidence : 3,
+      openaiModel: typeof ai.openaiModel === "string" ? ai.openaiModel : "gpt-5.5",
+      geminiModel: typeof ai.geminiModel === "string" ? ai.geminiModel : "gemini-2.5-flash",
+      claudeModel: typeof ai.claudeModel === "string" ? ai.claudeModel : "claude-sonnet-4-5",
       deepseekModel: typeof ai.deepseekModel === "string" ? ai.deepseekModel : "deepseek-v4-flash",
-      geminiModel: typeof ai.geminiModel === "string" ? ai.geminiModel : "gemini-1.5-flash",
       sendFilePaths: typeof ai.sendFilePaths === "boolean" ? ai.sendFilePaths : true,
       sendGitMetadata: typeof ai.sendGitMetadata === "boolean" ? ai.sendGitMetadata : true,
       sendSurroundingContext:
@@ -111,8 +115,10 @@ export function settingsToRepoConfig(s: GitHubSyncSettings): RepoConfigV1 {
       enabled: s.ai.enabled,
       silentMode: s.ai.silentMode,
       silentMinConfidence: s.ai.silentMinConfidence,
-      deepseekModel: s.ai.deepseekModel,
+      openaiModel: s.ai.openaiModel,
       geminiModel: s.ai.geminiModel,
+      claudeModel: s.ai.claudeModel,
+      deepseekModel: s.ai.deepseekModel,
       sendFilePaths: s.ai.sendFilePaths,
       sendGitMetadata: s.ai.sendGitMetadata,
       sendSurroundingContext: s.ai.sendSurroundingContext,
@@ -147,8 +153,10 @@ export function applyRepoConfig(
       enabled: cfg.ai.enabled,
       silentMode: cfg.ai.silentMode,
       silentMinConfidence: cfg.ai.silentMinConfidence,
-      deepseekModel: cfg.ai.deepseekModel,
+      openaiModel: cfg.ai.openaiModel,
       geminiModel: cfg.ai.geminiModel,
+      claudeModel: cfg.ai.claudeModel,
+      deepseekModel: cfg.ai.deepseekModel,
       sendFilePaths: cfg.ai.sendFilePaths,
       sendGitMetadata: cfg.ai.sendGitMetadata,
       sendSurroundingContext: cfg.ai.sendSurroundingContext,

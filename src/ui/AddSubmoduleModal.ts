@@ -2,6 +2,7 @@ import { App, Modal, Notice, requestUrl, setIcon } from "obsidian";
 import type GitHubSyncPlugin from "../main";
 import { isValidGitHubUrl, normalizeRepoPath } from "../git/SubmoduleManager";
 import { ensureRemoteHasCommits } from "../git/githubApi";
+import { L, tf } from "../i18n";
 
 export class AddSubmoduleModal extends Modal {
   private localPath = "";
@@ -21,21 +22,19 @@ export class AddSubmoduleModal extends Modal {
 
   onOpen(): void {
     const { contentEl } = this;
+    const t = L().settings;
     contentEl.empty();
     contentEl.addClass("ghs-add-modal");
 
-    contentEl.createEl("h3", { text: "Add submodule" });
-    contentEl.createEl("p", {
-      cls: "ghs-add-sub",
-      text: "Map a folder in your vault to a GitHub repository (submodule).",
-    });
+    contentEl.createEl("h3", { text: t.addSubTitle });
+    contentEl.createEl("p", { cls: "ghs-add-sub", text: t.addSubDesc });
 
     // ── Local path ─────────────────────────────────────────────
     const pathWrap = contentEl.createDiv("ghs-wizard-field");
-    pathWrap.createEl("label", { text: "Local path" });
+    pathWrap.createEl("label", { text: t.addSubLocalPath });
     const pathHint = pathWrap.createDiv("ghs-field-hint");
-    pathHint.setText("Folder relative to vault root (e.g. Projects/work)");
-    const pathInput = pathWrap.createEl("input", { attr: { placeholder: "Projects/work" } });
+    pathHint.setText(t.addSubLocalPathHint);
+    const pathInput = pathWrap.createEl("input", { attr: { placeholder: t.addSubLocalPathPh } });
     const pathBadge = pathWrap.createDiv("ghs-inline-badge");
     pathBadge.addClass("ghs-hidden");
     pathInput.oninput = () => {
@@ -46,10 +45,8 @@ export class AddSubmoduleModal extends Modal {
 
     // ── Remote URL ─────────────────────────────────────────────
     const urlWrap = contentEl.createDiv("ghs-wizard-field");
-    urlWrap.createEl("label", { text: "GitHub remote URL" });
-    const urlInput = urlWrap.createEl("input", {
-      attr: { placeholder: "https://github.com/user/repo.git" },
-    });
+    urlWrap.createEl("label", { text: t.addSubRemoteUrl });
+    const urlInput = urlWrap.createEl("input", { attr: { placeholder: t.addSubRemoteUrlPh } });
     const urlBadge = urlWrap.createDiv("ghs-inline-badge");
     urlBadge.addClass("ghs-hidden");
     urlInput.oninput = () => {
@@ -63,7 +60,7 @@ export class AddSubmoduleModal extends Modal {
       }
       if (!isValidGitHubUrl(this.remoteUrl)) {
         this.remoteStatus = "invalid";
-        this.remoteMsg = "Doesn't look like a GitHub URL";
+        this.remoteMsg = t.addSubUrlInvalid;
         this.renderRemoteBadge(urlBadge);
         this.refreshSubmit();
         return;
@@ -75,30 +72,27 @@ export class AddSubmoduleModal extends Modal {
 
     // ── Branch ─────────────────────────────────────────────────
     const branchWrap = contentEl.createDiv("ghs-wizard-field");
-    branchWrap.createEl("label", { text: "Branch" });
+    branchWrap.createEl("label", { text: t.addSubBranch });
     // eslint-disable-next-line obsidianmd/ui/sentence-case -- "main" is a branch name, not UI prose
     const branchInput = branchWrap.createEl("input", { attr: { placeholder: "main" } });
     branchInput.value = "main";
     branchInput.oninput = () => (this.branch = branchInput.value.trim() || "main");
 
-    // ── Upstream branch (optional auto-merge source) ───────────
-    const upWrap = contentEl.createDiv("ghs-wizard-field");
-    upWrap.createEl("label", { text: "Upstream branch (optional)" });
-    const upHint = upWrap.createDiv("ghs-field-hint");
-    upHint.setText(
-      "Always merge in changes from this branch on every sync. " +
-      "Use it when you work on a personal branch but want to keep " +
-      "absorbing updates teammates push to the shared one (e.g. main)."
-    );
-    // eslint-disable-next-line obsidianmd/ui/sentence-case -- "main" is a branch name, not UI prose
-    const upInput = upWrap.createEl("input", { attr: { placeholder: "main (leave empty to disable)" } });
-    upInput.oninput = () => (this.upstreamBranch = upInput.value.trim());
+    // Upstream branch — team workflow only. Hidden in personal mode.
+    if (this.plugin.settings.usageMode === "team") {
+      const upWrap = contentEl.createDiv("ghs-wizard-field");
+      upWrap.createEl("label", { text: t.addSubUpstream });
+      const upHint = upWrap.createDiv("ghs-field-hint");
+      upHint.setText(t.addSubUpstreamHint);
+      const upInput = upWrap.createEl("input", { attr: { placeholder: t.addSubUpstreamPh } });
+      upInput.oninput = () => (this.upstreamBranch = upInput.value.trim());
+    }
 
     // ── Footer ─────────────────────────────────────────────────
     const footer = contentEl.createDiv("ghs-wizard-footer");
-    const cancel = footer.createEl("button", { text: "Cancel" });
+    const cancel = footer.createEl("button", { text: t.addSubCancel });
     cancel.onclick = () => this.close();
-    const submit = footer.createEl("button", { text: "Add", cls: "mod-cta" });
+    const submit = footer.createEl("button", { text: t.addSubAdd, cls: "mod-cta" });
     submit.disabled = true;
     submit.onclick = () => this.submit();
     this.submitBtn = submit;
@@ -121,12 +115,12 @@ export class AddSubmoduleModal extends Modal {
   }
 
   private async probeRemote(badge: HTMLElement): Promise<void> {
-    // Try GitHub API to confirm reachability. Falls back to URL-only validation if token missing.
+    const t = L().settings;
     const token = this.plugin.settings.githubToken;
     const match = this.remoteUrl.match(/github\.com[:/]([\w.-]+)\/([\w.-]+?)(\.git)?\/?$/);
     if (!match) {
       this.remoteStatus = "invalid";
-      this.remoteMsg = "Couldn't parse owner/repo";
+      this.remoteMsg = t.addSubUrlParse;
       this.renderRemoteBadge(badge);
       this.refreshSubmit();
       return;
@@ -142,10 +136,6 @@ export class AddSubmoduleModal extends Modal {
         throw: false,
       });
       if (res.status === 200) {
-        // Repo exists, but `git submodule add` will fail with
-        // "branch yet to be born" if it has no commits. GitHub returns
-        // 409 on /commits for empty repos — flag it so submit() can
-        // silently auto-initialize the remote before adding.
         const commits = await requestUrl({
           url: `https://api.github.com/repos/${owner}/${repo}/commits?per_page=1`,
           headers,
@@ -153,27 +143,27 @@ export class AddSubmoduleModal extends Modal {
         });
         this.remoteIsEmpty = commits.status === 409;
         this.remoteStatus = "valid";
-        this.remoteMsg = `Found ${owner}/${repo}`;
+        this.remoteMsg = tf(t.addSubRemoteFound, `${owner}/${repo}`);
       } else if (res.status === 404) {
         this.remoteStatus = "invalid";
-        this.remoteMsg = "Repository not found";
+        this.remoteMsg = t.addSubRepoNotFound;
       } else if (res.status === 401 || res.status === 403) {
         this.remoteStatus = "invalid";
-        this.remoteMsg = "Token can't access this repo";
+        this.remoteMsg = t.addSubNoAccess;
       } else {
         this.remoteStatus = "invalid";
-        this.remoteMsg = `GitHub returned ${res.status}`;
+        this.remoteMsg = tf(t.addSubHttpStatus, res.status);
       }
     } catch {
-      // Network failure — accept URL-level validation and let user proceed.
       this.remoteStatus = "valid";
-      this.remoteMsg = "Couldn't verify (offline?), but URL looks OK";
+      this.remoteMsg = t.addSubOfflineOk;
     }
     this.renderRemoteBadge(badge);
     this.refreshSubmit();
   }
 
   private checkPath(badge: HTMLElement): void {
+    const t = L().settings;
     badge.empty();
     if (!this.localPath) {
       badge.addClass("ghs-hidden");
@@ -188,7 +178,7 @@ export class AddSubmoduleModal extends Modal {
       badge.addClass("invalid");
       const iconWrap = badge.createSpan();
       setIcon(iconWrap, "alert-circle");
-      badge.createSpan({ text: "A submodule already exists at this path" });
+      badge.createSpan({ text: t.addSubPathTaken });
     } else {
       this.pathStatus = "ok";
       badge.removeClass("ghs-hidden");
@@ -196,17 +186,23 @@ export class AddSubmoduleModal extends Modal {
       badge.addClass("valid");
       const iconWrap = badge.createSpan();
       setIcon(iconWrap, "check-circle");
-      badge.createSpan({ text: "Path is available" });
+      badge.createSpan({ text: t.addSubPathOk });
     }
   }
 
   private refreshSubmit(): void {
     if (!this.submitBtn) return;
+    // Probe failures (404, SSO block, token scope, offline) are common
+    // and don't always mean the submodule is unusable — sometimes the
+    // user just hasn't authorized the token for the org yet. We let
+    // them save the config anyway and diagnose from Settings → Test.
+    // Still gate on basic syntactic checks to avoid persisting typos.
+    const urlSyntaxOk =
+      this.remoteUrl.length > 0 && isValidGitHubUrl(this.remoteUrl);
     const ok =
       this.localPath.length > 0 &&
       this.pathStatus === "ok" &&
-      this.remoteUrl.length > 0 &&
-      this.remoteStatus === "valid";
+      urlSyntaxOk;
     this.submitBtn.disabled = !ok;
   }
 
@@ -226,46 +222,58 @@ export class AddSubmoduleModal extends Modal {
       syncInterval: this.plugin.settings.autoSyncInterval,
     };
 
+    const t = L().settings;
     if (this.submitBtn) {
       this.submitBtn.disabled = true;
-      this.submitBtn.textContent = "Adding…";
+      this.submitBtn.textContent = t.addSubAdding;
     }
     try {
       if (this.remoteIsEmpty) {
-        if (this.submitBtn) this.submitBtn.textContent = "Preparing repository…";
+        if (this.submitBtn) this.submitBtn.textContent = t.addSubPreparing;
         await ensureRemoteHasCommits(this.remoteUrl, this.plugin.settings.githubToken);
         this.remoteIsEmpty = false;
       }
       await this.plugin.addSubmodule(config);
-      new Notice(`Added "${this.localPath}"`);
+      new Notice(tf(t.addSubAdded, this.localPath));
       this.close();
     } catch (e) {
       const raw = (e as Error).message ?? "";
-      // Belt-and-braces: probeRemote's offline fallback can let an empty
-      // repo through. If we land here with that error, try auto-init then
-      // retry the submodule add once.
       if (
         !this.remoteIsEmpty &&
         /yet to be born|unable to checkout submodule/i.test(raw)
       ) {
         try {
-          if (this.submitBtn) this.submitBtn.textContent = "Preparing repository…";
+          if (this.submitBtn) this.submitBtn.textContent = t.addSubPreparing;
           await ensureRemoteHasCommits(this.remoteUrl, this.plugin.settings.githubToken);
           await this.plugin.addSubmodule(config);
-          new Notice(`Added "${this.localPath}"`);
+          new Notice(tf(t.addSubAdded, this.localPath));
           this.close();
           return;
         } catch (retryErr) {
-          new Notice(`Failed: ${(retryErr as Error).message}`, 8000);
+          this.finishWithSavedButUncloned(config.localPath, (retryErr as Error).message);
+          return;
         }
-      } else {
-        new Notice(`Failed: ${raw}`, 8000);
       }
-      if (this.submitBtn) {
-        this.submitBtn.disabled = false;
-        this.submitBtn.textContent = "Add";
-      }
+      this.finishWithSavedButUncloned(config.localPath, raw);
     }
+  }
+
+  /**
+   * `plugin.addSubmodule` persists the config to settings *before*
+   * attempting the git clone, so a clone failure leaves the user with
+   * a saved-but-not-yet-cloned submodule. Close the modal anyway and
+   * point the user at the per-submodule Test button in settings —
+   * silently leaving the modal open would imply "nothing happened",
+   * but the config really did save.
+   */
+  private finishWithSavedButUncloned(localPath: string, reason: string): void {
+    // Raw git errors here can be very long (lock file paths, multi-line
+    // hints). The settings page's per-submodule Test button is where the
+    // user actually diagnoses — log the full reason for debugging and
+    // keep the toast to a short acknowledgement.
+    console.warn("[agentic-git-sync] submodule saved but clone failed:", reason);
+    new Notice(tf(L().settings.addSubSaved, localPath));
+    this.close();
   }
 
   onClose(): void {

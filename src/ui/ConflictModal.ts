@@ -43,7 +43,14 @@ export class ConflictModal extends Modal {
     private conflictPaths: string[],
     private onResolved: () => void,
     repoLabel = "Main Vault",
-    aiClient: AIClient | null = null
+    aiClient: AIClient | null = null,
+    /**
+     * Optional callback that triggers a fresh sync of this repo. When provided,
+     * the "no conflict markers found" dialog shows an extra "Force clean &
+     * resync" button that aborts the merge AND re-runs sync in one click —
+     * the common case where the user is stuck in a stale unmerged-index state.
+     */
+    private onForceResync: (() => Promise<void>) | null = null,
   ) {
     super(app);
     this.repoLabel = repoLabel;
@@ -192,10 +199,63 @@ export class ConflictModal extends Modal {
     contentEl.empty();
 
     if (this.files.length === 0) {
+      // Card state can fall out of sync with git: a previous merge may
+      // have been aborted out-of-band, iCloud may have synced clean
+      // copies over the markers, or the system-file auto-resolver may
+      // have wiped them without notifying the dashboard. Either way,
+      // there's nothing to resolve in this modal — clear the card so
+      // the stale "Resolve" affordance doesn't keep luring the user
+      // back, and offer an explicit `git merge --abort` for the case
+      // where MERGE_HEAD is still pending under the surface.
       const empty = contentEl.createDiv("ghs-cv2-empty");
-      empty.createEl("p", { text: "No conflicts to resolve." });
-      const closeBtn = empty.createEl("button", { text: "Close", cls: "mod-cta" });
-      closeBtn.onclick = () => this.close();
+      empty.createEl("p", { text: "No conflict markers found in the listed files." });
+      empty.createEl("p", {
+        cls: "ghs-cv2-empty-sub",
+        text:
+          "The merge was likely resolved or aborted elsewhere. " +
+          "Closing this dialog will clear the conflict card. " +
+          "If a merge is still pending in git, use Abort merge to clean it up.",
+      });
+      const actions = empty.createDiv("ghs-cv2-empty-actions");
+
+      const abortBtn = actions.createEl("button", { text: "Abort merge" });
+      abortBtn.onclick = async () => {
+        abortBtn.disabled = true;
+        try {
+          await this.ops.abortMerge();
+          new Notice("Aborted any pending merge.");
+        } catch (e) {
+          new Notice(`Couldn't abort: ${(e as Error).message}`, 8000);
+        }
+        this.onResolved();
+        this.close();
+      };
+
+      // Force clean & resync — abort + (now-strengthened) index reset + trigger
+      // a fresh sync, all in one click. Surfaces only when the caller wired
+      // a resync callback (dashboard does; setup wizard doesn't).
+      if (this.onForceResync) {
+        const forceBtn = actions.createEl("button", { text: "Force clean & resync", cls: "mod-cta" });
+        forceBtn.onclick = async () => {
+          forceBtn.disabled = true;
+          abortBtn.disabled = true;
+          try {
+            await this.ops.abortMerge();
+            this.onResolved();
+            this.close();
+            new Notice("Cleaned merge state — resyncing…");
+            await this.onForceResync!();
+          } catch (e) {
+            new Notice(`Force clean failed: ${(e as Error).message}`, 8000);
+          }
+        };
+      }
+
+      const closeBtn = actions.createEl("button", { text: "Close" });
+      closeBtn.onclick = () => {
+        this.onResolved();
+        this.close();
+      };
       return;
     }
 
