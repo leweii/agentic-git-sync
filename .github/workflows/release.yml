@@ -47,11 +47,20 @@ jobs:
             manifest.json
             styles.css
 
-      - name: Create release
+      - name: Create or update release
+        # Idempotent: if a release for this tag already exists (e.g. someone
+        # ran `gh release create` manually with curated notes), upload the
+        # freshly-built+attested artifacts to it instead of failing. The
+        # manually-set release notes are preserved.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
-            --notes "Automated release for $GITHUB_REF_NAME. Build artifacts carry a GitHub artifact attestation." \
-            main.js manifest.json styles.css
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists — uploading attested artifacts."
+            gh release upload "$GITHUB_REF_NAME" main.js manifest.json styles.css --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --notes "Automated release for $GITHUB_REF_NAME. Build artifacts carry a GitHub artifact attestation." \
+              main.js manifest.json styles.css
+          fi
