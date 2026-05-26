@@ -490,8 +490,58 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
     const card = this.sectionHeader(parent, t.sectionAccount);
 
     let tokenInputEl: HTMLInputElement | null = null;
+    let nameInputEl: HTMLInputElement | null = null;
+    let emailInputEl: HTMLInputElement | null = null;
+    let tokenDebounce: number | null = null;
+
     const testBadge = createDiv("ghs-inline-badge ghs-test-badge");
     testBadge.addClass("ghs-hidden");
+
+    const renderBadge = (status: "loading" | "success" | "error", login?: string) => {
+      testBadge.empty();
+      testBadge.removeClass("ghs-hidden", "success", "error", "loading");
+      testBadge.addClass(status);
+      if (status === "loading") {
+        setIcon(testBadge.createSpan(), "loader");
+        testBadge.createSpan({ text: " Verifying…" });
+      } else if (status === "success") {
+        setIcon(testBadge.createSpan(), "check-circle-2");
+        testBadge.createSpan({ text: ` Connected as @${login}` });
+      } else {
+        setIcon(testBadge.createSpan(), "x-circle");
+        testBadge.createSpan({ text: " Invalid token — check permissions" });
+      }
+    };
+
+    const fetchIdentity = async (token: string) => {
+      if (token.length < 10) { testBadge.addClass("ghs-hidden"); return; }
+      renderBadge("loading");
+      try {
+        const res = await requestUrl({
+          url: "https://api.github.com/user",
+          headers: { Authorization: `token ${token}`, "User-Agent": "ObsidianGitHubSync" },
+          throw: false,
+        });
+        if (res.status === 200) {
+          const user = res.json as GitHubUser;
+          renderBadge("success", user.login);
+          if (nameInputEl && !nameInputEl.value && user.name) {
+            nameInputEl.value = user.name;
+            this.plugin.settings.gitUser = user.name;
+          }
+          if (emailInputEl && !emailInputEl.value && user.email) {
+            emailInputEl.value = user.email;
+            this.plugin.settings.gitEmail = user.email;
+          }
+          await this.plugin.saveSettings();
+          this.plugin.reinitGit();
+        } else {
+          renderBadge("error");
+        }
+      } catch {
+        renderBadge("error");
+      }
+    };
 
     const tokenSetting = new Setting(card)
       .setName(t.tokenLabel)
@@ -516,6 +566,8 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
             this.plugin.settings.githubToken = v;
             await this.plugin.saveSettings();
             this.plugin.reinitGit();
+            if (tokenDebounce) window.clearTimeout(tokenDebounce);
+            tokenDebounce = window.setTimeout(() => { void fetchIdentity(v.trim()); }, 600);
           });
       })
       .addExtraButton((b) =>
@@ -528,7 +580,8 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
 
     new Setting(card)
       .setName(t.nameLabel)
-      .addText((text) =>
+      .addText((text) => {
+        nameInputEl = text.inputEl;
         text
           .setPlaceholder(t.namePlaceholder)
           .setValue(this.plugin.settings.gitUser)
@@ -536,12 +589,13 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
             this.plugin.settings.gitUser = v;
             await this.plugin.saveSettings();
             this.plugin.reinitGit();
-          })
-      );
+          });
+      });
 
     new Setting(card)
       .setName(t.emailLabel)
-      .addText((text) =>
+      .addText((text) => {
+        emailInputEl = text.inputEl;
         text
           .setPlaceholder(t.emailPlaceholder)
           .setValue(this.plugin.settings.gitEmail)
@@ -549,8 +603,8 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
             this.plugin.settings.gitEmail = v;
             await this.plugin.saveSettings();
             this.plugin.reinitGit();
-          })
-      );
+          });
+      });
   }
 
   // ── 3. AI providers (keys only) ──────────────────────────────

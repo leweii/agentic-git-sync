@@ -124,6 +124,39 @@ export const RECOVERY_TOOLS: Record<string, RecoveryToolExecutor> = {
    * because lock files are the single most common recovery scenario
    * (one in every Obsidian-was-quit-mid-sync session).
    */
+  /**
+   * Pull from origin using the current branch, allowing unrelated histories.
+   * Used as the deterministic recovery for non-fast-forward push rejections:
+   * remote has commits we haven't merged yet — pull them, then the retry
+   * loop pushes again. Safe; no data loss possible.
+   */
+  pull_remote: async (ctx) => {
+    await ctx.git.pull("origin", ctx.branch, {
+      "--no-rebase": null,
+      "--allow-unrelated-histories": null,
+    });
+  },
+
+  /**
+   * Discard local changes to tracked files that are blocking a pull.
+   * Safe because _doSync already committed everything NOT in ignorePatterns
+   * before calling pull — so whatever remains on disk (and would be
+   * overwritten) was deliberately excluded from commits. Letting git
+   * overwrite those files is the intended behaviour.
+   */
+  discard_tracked_changes: async (ctx) => {
+    await ctx.git.checkout(["--", "."]);
+  },
+
+  /** Checkout (or create) the target branch so push has a valid ref. */
+  checkout_branch: async (ctx) => {
+    try {
+      await ctx.git.checkout(ctx.branch);
+    } catch {
+      await ctx.git.checkoutLocalBranch(ctx.branch);
+    }
+  },
+
   clear_lock: async (ctx) => {
     const gitDir = resolveGitDir(ctx.vaultPath);
     if (!gitDir) return;

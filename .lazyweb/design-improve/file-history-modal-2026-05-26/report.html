@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design Improvement: File History Modal</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.6; color: #1a1a1a; background: #f8f8f8; padding: 40px 20px 80px; }
+  .container { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
+  h2 { font-size: 19px; font-weight: 600; margin: 40px 0 12px; padding-bottom: 6px; border-bottom: 1px solid #e0e0e0; }
+  h3 { font-size: 16px; font-weight: 600; margin: 28px 0 10px; }
+  p { margin-bottom: 12px; color: #333; }
+  .tldr { background: #e8f0fe; border-left: 4px solid #4285f4; border-radius: 0 8px 8px 0; padding: 16px 20px; margin: 20px 0 32px; }
+  .tldr p { margin: 0; color: #1a1a1a; font-size: 15px; }
+  .idea-card { background: #fff; border: 1px solid #e0e0e0; border-radius: 10px; padding: 22px 24px; margin: 20px 0; }
+  .idea-card h3 { margin-top: 0; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; margin-left: 8px; vertical-align: middle; }
+  .badge-high { background: #fff0c2; color: #7a5c00; }
+  pre { background: #1e1e1e; color: #d4d4d4; border-radius: 8px; padding: 16px 20px; font-size: 13px; line-height: 1.5; overflow-x: auto; margin: 14px 0; font-family: "SF Mono", "Fira Code", monospace; }
+  code { font-family: "SF Mono", "Fira Code", monospace; font-size: 13px; background: #f0f0f0; padding: 1px 5px; border-radius: 4px; }
+  .mock { background: #1e1e1e; color: #d4d4d4; border-radius: 8px; padding: 16px 20px; font-family: "SF Mono", "Fira Code", monospace; font-size: 13px; line-height: 1.7; margin: 14px 0; white-space: pre; overflow-x: auto; }
+  .working { background: #f0faf0; border: 1px solid #c3e6cb; border-radius: 8px; padding: 16px 20px; margin: 20px 0; }
+  .working ul { padding-left: 22px; }
+  .working li { margin-bottom: 6px; }
+  .table-wrap { overflow-x: auto; margin: 16px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { background: #f0f0f0; text-align: left; padding: 10px 14px; font-weight: 600; border: 1px solid #ddd; }
+  td { padding: 9px 14px; border: 1px solid #ddd; }
+  tr:nth-child(even) td { background: #fafafa; }
+  .tag { color: #6a737d; font-style: italic; }
+  .star { color: #f5a623; }
+  .why { background: #f8f8f8; border-left: 3px solid #ccc; padding: 10px 14px; margin: 12px 0; border-radius: 0 6px 6px 0; font-size: 14px; color: #555; }
+  .why strong { color: #333; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>Design Improvement: File History Modal</h1>
+  <p style="color:#888; margin-bottom:4px;">agentic-git-sync · 2026-05-26</p>
+
+  <div class="tldr">
+    <p><strong>TL;DR:</strong> The biggest opportunity is switching from a <strong>vertical stack</strong> (list on top, diff below) to a <strong>horizontal split</strong> (list left, diff right). This is the dominant pattern in every serious diff viewer — VS Code, GitHub, GitLens, SourceTree — because it keeps the commit list visible while reading a long diff.</p>
+  </div>
+
+  <h2>Current State</h2>
+  <p>The modal uses a top-bottom layout: commit list fills the top, and a diff pane appears below when a commit is selected. The list uses a 4-column grid where hash, message, author, and time all receive equal visual weight.</p>
+
+  <h2>Improvement Ideas</h2>
+
+  <!-- IDEA 1 -->
+  <div class="idea-card">
+    <h3>1. Horizontal Split: List Left · Diff Right <span class="star">⭐</span> <span class="badge badge-high">Highest Impact</span></h3>
+    <p>Change the modal from a vertical (top-bottom) to a horizontal (left-right) layout. The commit list becomes a fixed-width left panel (~280px); the diff occupies the remaining right space.</p>
+
+    <div class="why"><strong>Why this works:</strong> When reading a diff you inevitably scroll. In the current layout the commit list disappears immediately. In a left/right split the list stays anchored — which is exactly why VS Code, GitHub, GitLens, SourceTree, and Tower all use this layout for history views.</div>
+
+    <div class="mock">┌───────────────────────────────────────────────────────────┐
+│  ⏱  文件历史  ·  A0-Inbox/中年男人的宿命.md              │
+├──────────────────┬────────────────────────────────────────┤
+│ 12d08a4  2h ago  │  12d08a4 · sync: 2026-05-26T03:26…    │
+│ e6dbb01 16h ago  │  Jakob He · May 26             [⎘]    │
+│▶d394360 17h ago  │────────────────────────────────────────│
+│ 94bf4d8 17h ago  │ @@ -7,3 +7,6 @@                       │
+│ 7606696 17h ago  │   嗯嗯嗯                              │
+│ 9c21a76 17h ago  │   哦哦哦                              │
+│ ff83965 17h ago  │   哈哈哈                              │
+│ 7855e5e 17h ago  │ +                                      │
+│ 37da56f 17h ago  │ +明天会下雨。                         │
+│                  │ +明天我吃饭！                         │
+│                  │                                        │
+├──────────────────┴────────────────────────────────────────┤
+│                                             [关闭]         │
+└───────────────────────────────────────────────────────────┘</div>
+
+    <p><strong>Implementation:</strong> Replace the flex-column layout with <code>display: grid; grid-template-columns: 280px 1fr</code>. Give the list panel <code>overflow-y: auto</code> and the diff panel its own independent scroll context.</p>
+  </div>
+
+  <!-- IDEA 2 -->
+  <div class="idea-card">
+    <h3>2. Keyboard Navigation (↑↓ through commits)</h3>
+    <p>Add <code>ArrowUp</code> / <code>ArrowDown</code> key handling so users can step through commits without reaching for the mouse. This is table-stakes for developer tools.</p>
+
+    <div class="why"><strong>Why this works:</strong> After clicking into the modal, users naturally want to keyboard-navigate. VS Code's Timeline panel, SourceTree, and GitHub Desktop all support ↑↓. In a narrow list panel (see idea #1) this becomes even more natural — the list feels like a sidebar to navigate.</div>
+
+    <pre>// In onOpen(), after renderList():
+this.scope.register([], "ArrowDown", () => {
+  const next = (this.anchorIdx ?? -1) + 1;
+  if (next &lt; this.commits.length) {
+    this.anchorIdx = next; this.rangeEndIdx = null;
+    this.renderList(); void this.updateDiff();
+  }
+  return false;
+});
+this.scope.register([], "ArrowUp", () => {
+  const prev = (this.anchorIdx ?? this.commits.length) - 1;
+  if (prev >= 0) {
+    this.anchorIdx = prev; this.rangeEndIdx = null;
+    this.renderList(); void this.updateDiff();
+  }
+  return false;
+});</pre>
+    <p>Use Obsidian's <code>this.scope</code> (available on <code>Modal</code>) so shortcuts don't conflict with global bindings.</p>
+  </div>
+
+  <!-- IDEA 3 -->
+  <div class="idea-card">
+    <h3>3. Add a +N −N Stat Bar in the Diff Header</h3>
+    <p>Between the commit info bar and the diff content, show a one-line stat bar with additions and deletions count. This gives users a "how big is this change?" signal before reading.</p>
+
+    <div class="why"><strong>Why this works:</strong> GitHub, GitLens, and Tower all surface this stat immediately. For long files a change might add 50 lines but the actual diff is small — or vice versa. The stat bar sets the right expectations before the user starts scrolling.</div>
+
+    <div class="mock">┌─────────────────────────────────────────────────────┐
+│ 12d08a4  sync: 2026-05-26…  Jakob He · May 26  [⎘]  │
+│ ████░░░░░░░░░░░░░░░░  +3 additions  −0 deletions     │
+├─────────────────────────────────────────────────────┤
+│ @@ -7,3 +7,6 @@                                     │
+│   嗯嗯嗯                                            │</div>
+
+    <p><strong>Implementation:</strong> Parse the diff text for lines starting with <code>+</code> (excluding <code>+++</code>) and <code>-</code> (excluding <code>---</code>) to get counts. The colored bar is a proportion fill: <code>width: ${adds/(adds+dels)*100}%</code> green, remainder red.</p>
+  </div>
+
+  <!-- IDEA 4 -->
+  <div class="idea-card">
+    <h3>4. Visual Hierarchy in the Commit List</h3>
+    <p>The current 4-column grid gives equal weight to hash, message, author, and time. The commit message should be the primary reading target; hash and author are secondary metadata.</p>
+
+    <div class="why"><strong>Why this works:</strong> GitLens, GitHub Desktop, and Tower all use a single dominant line for the message with muted secondary text. The current design makes the bright teal hash links draw the eye away from the most important column.</div>
+
+    <div class="mock">Current:
+  12d08a4  sync: 2026-05-26T03:26:01.016Z  Jakob He  2h ago
+  (all columns equal weight, hash dominates with teal color)
+
+Proposed:
+  sync: 2026-05-26T03:26:01.016Z ················ 12d08a4  2h ago
+  (message bold/primary, hash + time muted, no author column needed)</div>
+
+    <p>Remove the author column from the list (visible in the diff info bar already). Let the message fill available space with <code>flex: 1; overflow: hidden; text-overflow: ellipsis</code>. Style hash and time as <code>color: var(--text-muted); font-size: 12px</code>.</p>
+  </div>
+
+  <!-- IDEA 5 -->
+  <div class="idea-card">
+    <h3>5. Line Numbers in the Diff</h3>
+    <p>Show before/after line numbers for each diff line. This gives spatial context ("this change is on line 47") and is present in every serious diff viewer.</p>
+
+    <div class="mock">     │      │ @@ -7,3 +7,6 @@
+   7 │    7  │   嗯嗯嗯
+   8 │    8  │   哦哦哦
+   9 │    9  │   哈哈哈
+     │   10  │ +
+     │   11  │ +明天会下雨。
+     │   12  │ +明天我吃饭！</div>
+
+    <p><strong>Implementation:</strong> Parse the <code>@@ -A,B +C,D @@</code> hunk header to extract start line numbers, then increment two counters (<code>oldLine</code>, <code>newLine</code>) as you render. Use <code>display: grid; grid-template-columns: 36px 36px 1fr</code> per row. Skip line number increment for deleted/added lines on the respective side.</p>
+  </div>
+
+  <h2>What's Working</h2>
+  <div class="working">
+    <ul>
+      <li><strong>Shift-click range selection</strong> — elegant and powerful; keep exactly as-is</li>
+      <li><strong>Range info bar</strong> ("7855e5e → 9c21a76 · 3 commits combined") — clear and useful</li>
+      <li><strong>Diff syntax coloring</strong> — the green/red/hunk/meta coloring is correct and readable</li>
+      <li><strong>Modal size</strong> — 95vw × 90vh is appropriate for a diff viewer</li>
+      <li><strong>Copy hash button</strong> — good utility, correctly positioned in the info bar</li>
+    </ul>
+  </div>
+
+  <h2>Priority Order</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>#</th><th>Change</th><th>Effort</th><th>Impact</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>Horizontal split layout</td><td>Medium</td><td><strong>Very High</strong></td></tr>
+        <tr><td>2</td><td>Keyboard navigation (↑↓)</td><td>Low</td><td>High</td></tr>
+        <tr><td>3</td><td>+N −N stat bar</td><td>Low</td><td>Medium</td></tr>
+        <tr><td>4</td><td>Visual hierarchy in list rows</td><td>Low</td><td>Medium</td></tr>
+        <tr><td>5</td><td>Line numbers in diff</td><td>Medium</td><td>Medium</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Reference Pattern</h2>
+  <p>Deepnote's version history screen (found in Lazyweb DB) uses a horizontal split: left sidebar lists chronological versions with timestamps and autosave labels; right pane shows the selected version's content. This directly validates the horizontal split pattern for "history + preview" UI — and Deepnote is closer in spirit to Obsidian (a note-taking tool with version history) than a code editor is.</p>
+
+</div>
+</body>
+</html>

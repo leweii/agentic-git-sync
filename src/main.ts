@@ -230,18 +230,26 @@ export default class GitHubSyncPlugin extends Plugin {
   private async autoInitSubmodules(): Promise<void> {
     if (this.settings.submodules.length === 0) return;
 
-    // Detect OS-level folder renames (Obsidian's rename event won't fire
-    // for those). Uses the .git gitfile as a stable fingerprint of the
-    // original submodule path.
+    // Stamp pluginid into .gitmodules entries that don't have one yet.
+    // Must run before reconcile so id-based lookup works on all entries.
+    await this.submoduleManager.ensurePluginIds(this.settings.submodules);
+
+    // Reconcile plugin settings from .gitmodules — this handles both
+    // OS-level renames (gitfile fingerprint path changed) and any manual
+    // edits to .gitmodules (e.g. URL changed directly).
+    await this.reconcileSubmoduleSettings();
+
+    // For submodules whose folder no longer exists, try to locate them by
+    // the .git gitfile fingerprint (OS-level rename that happened while
+    // Obsidian was closed — reconcile won't find these because .gitmodules
+    // was already updated by git, but the folder is at the new path).
     const renames = await this.submoduleManager.detectRenamedPaths(this.settings.submodules);
     for (const { config, newPath } of renames) {
       const oldPath = config.localPath;
       config.localPath = newPath;
       new Notice(`Git Sync: submodule path updated\n${oldPath} → ${newPath}`);
     }
-    if (renames.length > 0) {
-      await this.saveSettings();
-    }
+    if (renames.length > 0) await this.saveSettings();
 
     const newly = await this.submoduleManager.ensureInitialized(
       this.settings.submodules,
@@ -251,6 +259,28 @@ export default class GitHubSyncPlugin extends Plugin {
     if (newly.length > 0) {
       new Notice(`Initialized ${newly.length} submodule(s): ${newly.join(", ")}`);
       this.dashboard?.refreshRepos();
+    }
+  }
+
+  /**
+   * Read .gitmodules and update any plugin settings that have drifted.
+   * Called on startup and after any operation that may have changed .gitmodules.
+   */
+  private async reconcileSubmoduleSettings(): Promise<void> {
+    const reconciled = this.submoduleManager.reconcileConfigs(this.settings.submodules);
+    let changed = false;
+    for (let i = 0; i < reconciled.length; i++) {
+      if (
+        reconciled[i].localPath !== this.settings.submodules[i].localPath ||
+        reconciled[i].remoteUrl !== this.settings.submodules[i].remoteUrl
+      ) {
+        changed = true;
+        break;
+      }
+    }
+    if (changed) {
+      this.settings.submodules = reconciled;
+      await this.saveSettings();
     }
   }
 
@@ -710,19 +740,28 @@ export default class GitHubSyncPlugin extends Plugin {
 
   private handleFolderRename(file: TAbstractFile, oldPath: string): void {
     if (!(file instanceof TFolder)) return;
-    let changed = false;
+    const affected: Array<{ sub: typeof this.settings.submodules[number]; oldSub: string; newSub: string }> = [];
     for (const sub of this.settings.submodules) {
       if (sub.localPath === oldPath) {
-        sub.localPath = file.path;
-        changed = true;
+        affected.push({ sub, oldSub: oldPath, newSub: file.path });
       } else if (sub.localPath.startsWith(oldPath + "/")) {
-        sub.localPath = file.path + sub.localPath.slice(oldPath.length);
-        changed = true;
+        affected.push({ sub, oldSub: sub.localPath, newSub: file.path + sub.localPath.slice(oldPath.length) });
       }
     }
-    if (changed) {
-      void this.saveSettings();
-      new Notice(`Git Sync: submodule path updated\n${oldPath} → ${file.path}`);
+    if (affected.length === 0) return;
+
+    // Update plugin settings immediately — reconcileConfigs can't handle renames
+    // because after renameSubmodulePath the old path is gone from .gitmodules.
+    for (const { sub, newSub } of affected) sub.localPath = newSub;
+    void this.saveSettings();
+
+    // Update all git config files to match the new path.
+    for (const { sub, oldSub, newSub } of affected) {
+      void this.submoduleManager.renameSubmodulePath(oldSub, newSub, sub.id)
+        .then(() => { new Notice(`Git Sync: submodule path updated\n${oldSub} → ${newSub}`); })
+        .catch((e: Error) => {
+          new Notice(`Git Sync: git config repair failed: ${e.message}`);
+        });
     }
   }
 

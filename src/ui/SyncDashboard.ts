@@ -1,4 +1,5 @@
 import { ItemView, Modal, Notice, WorkspaceLeaf, setIcon, TFile } from "obsidian";
+import { SetupWizard } from "./SetupWizard";
 import type { FileCommit } from "../git/GitManager";
 import type { GitManager } from "../git/GitManager";
 import type GitHubSyncPlugin from "../main";
@@ -177,15 +178,8 @@ export class SyncDashboard extends ItemView {
       const emptyIcon = this.emptyEl.createDiv({ cls: "ghs-empty-icon" });
       setIcon(emptyIcon, "git-branch");
       this.emptyEl.createEl("p", { text: "No repositories configured yet." });
-      const openSettings = this.emptyEl.createEl("button", { text: "Open settings", cls: "mod-cta" });
-      openSettings.onclick = () => {
-        // app.setting is an undocumented runtime property exposed by
-        // Obsidian (used by many community plugins to open the Settings
-        // pane). Cast to a narrow shape rather than `any` so accidental
-        // misuse elsewhere still type-errors.
-        const appWithSetting = this.app as unknown as { setting?: { open?: () => void } };
-        appWithSetting.setting?.open?.();
-      };
+      const openSettings = this.emptyEl.createEl("button", { text: L().dashboard.openSetupWizard, cls: "mod-cta" });
+      openSettings.onclick = () => new SetupWizard(this.app, this.plugin).open();
     }
 
     // File History panel section
@@ -260,23 +254,6 @@ export class SyncDashboard extends ItemView {
     setIcon(errorIcon, "alert-circle");
     const errorText = errorRow.createSpan({ cls: "ghs-error-text" });
     const errorActions = errorRow.createDiv("ghs-error-actions");
-    // "Select" rather than "Copy" — we never write to the system
-    // clipboard ourselves. Clicking highlights the error text in the
-    // user's own selection so they can press the platform copy shortcut
-    // and the OS handles the clipboard write. Avoids the
-    // navigator.clipboard.writeText permission entirely.
-    const copyBtn = errorActions.createEl("button", {
-      text: L().dashboard.selectError,
-      attr: { title: L().dashboard.selectErrorTooltip },
-    });
-    copyBtn.onclick = () => {
-      const range = document.createRange();
-      range.selectNodeContents(errorText);
-      const sel = window.getSelection();
-      sel?.removeAllRanges();
-      sel?.addRange(range);
-      new Notice(L().dashboard.errorSelected);
-    };
     const resolveBtn = errorActions.createEl("button", { text: "Resolve", cls: "ghs-resolve-btn" });
     resolveBtn.onclick = () => this.openConflict(state.id);
 

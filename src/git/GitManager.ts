@@ -343,6 +343,27 @@ export class GitManager {
     } catch { /* best-effort */ }
   }
 
+  /**
+   * Parse file paths from a "would be overwritten by merge/checkout" error and
+   * clear them so the pull can proceed:
+   *   - tracked-modified files → git checkout -- <file> (reset to HEAD)
+   *   - untracked files on disk but tracked on remote → delete so git can create them
+   */
+  private async clearBlockingFiles(errMsg: string): Promise<void> {
+    const files = parseOverwriteBlockedFiles(errMsg);
+    if (files.length === 0) {
+      await this.git.checkout(["--", "."]).catch(() => {});
+      return;
+    }
+    for (const f of files) {
+      try {
+        await this.git.checkout(["--", f]);
+      } catch {
+        try { fs.unlinkSync(path.join(this.vaultPath, f)); } catch { /* already absent */ }
+      }
+    }
+  }
+
   async pull(branch = "main", onProgress?: ProgressFn): Promise<void> {
     await this.ready;
     onProgress?.({ phase: "pulling", message: `Pulling origin/${branch}` });
@@ -363,6 +384,11 @@ export class GitManager {
       ) {
         return;
       }
+      if (msg.includes("would be overwritten by merge") || msg.includes("would be overwritten by checkout")) {
+        await this.clearBlockingFiles(msg);
+        await this.git.pull("origin", branch, { "--rebase": "false" });
+        return;
+      }
       const conflicts = (await this.git.status()).conflicted;
       if (conflicts.length > 0) throw new GitConflictError(conflicts, false, msg);
       throw e;
@@ -376,13 +402,30 @@ export class GitManager {
    */
   private async pullWithAutoResolve(branch: string): Promise<void> {
     let rawErr = "";
+    const doPull = () =>
+      this.git.pull("origin", branch, { "--rebase": "false", "--allow-unrelated-histories": null });
+
     try {
-      await this.git.pull("origin", branch, { "--rebase": "false", "--allow-unrelated-histories": null });
+      await doPull();
     } catch (e) {
       const msg = (e as Error).message ?? "";
       rawErr = msg;
-      if (!msg.includes("Automatic merge failed") && !msg.includes("CONFLICT")) throw e;
-      // "Automatic merge failed" → conflicts on disk, handled below
+      if (msg.includes("would be overwritten by merge") || msg.includes("would be overwritten by checkout")) {
+        // Clear blocking files and retry. Don't return early — fall through to
+        // autoResolveSystemFiles so any conflicts the retry leaves (e.g. an
+        // add/add on .github-sync.json) are handled the same way as always.
+        await this.clearBlockingFiles(msg);
+        try {
+          await doPull();
+          rawErr = "";
+        } catch (e2) {
+          const msg2 = (e2 as Error).message ?? "";
+          rawErr = msg2;
+          if (!msg2.includes("Automatic merge failed") && !msg2.includes("CONFLICT")) throw e2;
+        }
+      } else if (!msg.includes("Automatic merge failed") && !msg.includes("CONFLICT")) {
+        throw e;
+      }
     }
 
     // Auto-resolve system files and clean up file/directory residuals.
@@ -454,8 +497,21 @@ export class GitManager {
     const stagedCount = status.staged.length;
     onProgress?.({ phase: "committing", message: "Committing merge" });
     await this.git.commit(message);
-    onProgress?.({ phase: "pushing", message: `Pushing to origin/${branch}` });
-    await this.runWithRetry(["push", "--set-upstream", "origin", branch], 3, onProgress);
+
+    // Push with agent-recovery — same pattern as sync(). The commit is
+    // already done so we only retry the push step, not the full commit.
+    const MAX_PUSH_RECOVERY = 2;
+    for (let attempt = 0; attempt <= MAX_PUSH_RECOVERY; attempt++) {
+      try {
+        onProgress?.({ phase: "pushing", message: `Pushing to origin/${branch}` });
+        await this.runWithRetry(["push", "--set-upstream", "origin", branch], 3, onProgress);
+        return stagedCount;
+      } catch (e) {
+        if (attempt >= MAX_PUSH_RECOVERY) throw e;
+        const recovered = await this.errorAgent.tryRecover(e as Error, "push", branch);
+        if (!recovered) throw e;
+      }
+    }
     return stagedCount;
   }
 
@@ -578,23 +634,31 @@ export class GitManager {
     await this.configureGit();
     await this.git.raw(["checkout", "-b", branch]).catch(() => {});
     await this.git.addRemote("origin", remoteUrl).catch(() => {});
-    // Write a .gitignore so git itself never tracks OS noise, the entire
-    // .obsidian config dir (per-machine UI state, installed plugins, themes,
-    // hotkeys), or the local trash. ignorePatterns in settings is only a
-    // commit-stage filter — .gitignore stops the file from being seen by
-    // git at all.
-    const gitignorePath = `${this.vaultPath}/.gitignore`;
-    if (!fs.existsSync(gitignorePath)) {
-      fs.writeFileSync(
-        gitignorePath,
-        [
-          ".DS_Store",
-          "Thumbs.db",
-          `${this.configDir}/`,
-          ".trash/",
-        ].join("\n") + "\n"
-      );
-    }
+    this.ensureGitignore();
+  }
+
+  /**
+   * Write a default .gitignore if one doesn't exist yet. Called both on
+   * fresh init and at the start of every sync so vaults that were set up
+   * outside the wizard (e.g. cloned repos) get the file automatically.
+   */
+  private ensureGitignore(): void {
+    const gitignorePath = path.join(this.vaultPath, ".gitignore");
+    if (fs.existsSync(gitignorePath)) return;
+    fs.writeFileSync(
+      gitignorePath,
+      [
+        "# macOS / Windows noise",
+        ".DS_Store",
+        "Thumbs.db",
+        "",
+        "# Obsidian app config — machine-local, not user content",
+        `${this.configDir}/`,
+        "",
+        "# Local trash",
+        ".trash/",
+      ].join("\n") + "\n"
+    );
   }
 
   /**
@@ -631,6 +695,10 @@ export class GitManager {
     const branch = opts.branch ?? "main";
     this.clearStaleIndexLock();
     opts.onProgress?.({ phase: "checking", message: "Checking status" });
+
+    // Ensure a .gitignore exists before touching the index — this covers vaults
+    // that were cloned or set up outside the wizard.
+    this.ensureGitignore();
 
     // Auto-init if this vault isn't a git repo yet.
     if (!(await this.isRepo())) {
@@ -895,6 +963,25 @@ export class GitManager {
     return diff.replace(/^\n+/, "");
   }
 
+}
+
+/**
+ * Parse the file list from a git "would be overwritten by merge/checkout" error.
+ * Both variants share the same indented-file-list structure:
+ *   "The following untracked working tree files would be overwritten by merge:\n\t<file>\n..."
+ *   "Your local changes to the following files would be overwritten by merge:\n\t<file>\n..."
+ */
+function parseOverwriteBlockedFiles(msg: string): string[] {
+  const idx = msg.search(/would be overwritten by (?:merge|checkout)/i);
+  if (idx === -1) return [];
+  const lines = msg.slice(idx).split("\n").slice(1);
+  const files: string[] = [];
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t || /^please/i.test(t) || /^aborting/i.test(t)) break;
+    files.push(t);
+  }
+  return files;
 }
 
 // Minimal glob-ish match: supports * and trailing /** style patterns.

@@ -1,4 +1,5 @@
 import simpleGit, { SimpleGit } from "simple-git";
+import path from "path";
 import { fs } from "../node-builtins";
 import type { SubmoduleConfig } from "../settings";
 import type { PendingChanges, SyncProgress } from "../types";
@@ -146,9 +147,13 @@ export class SubmoduleManager {
 
     const newly: string[] = [];
     const gitmodulesPath = `${this.vaultPath}/.gitmodules`;
-    const gitmodules = fs.existsSync(gitmodulesPath)
-      ? fs.readFileSync(gitmodulesPath, "utf8")
-      : "";
+    const registeredPaths = new Set(
+      fs.existsSync(gitmodulesPath)
+        ? parseGitmodules(fs.readFileSync(gitmodulesPath, "utf8"))
+            .map((e) => e.path)
+            .filter(Boolean)
+        : []
+    );
 
     for (const c of configs) {
       const subDir = `${this.vaultPath}/${c.localPath}`;
@@ -156,7 +161,7 @@ export class SubmoduleManager {
       if (hasContent) continue;
 
       onProgress?.(`Initializing ${c.localPath}…`);
-      const inGitmodules = gitmodules.includes(`path = ${c.localPath}`);
+      const inGitmodules = registeredPaths.has(c.localPath);
       try {
         if (inGitmodules) {
           // Parent already knows about this submodule — just clone + checkout.
@@ -174,6 +179,153 @@ export class SubmoduleManager {
       }
     }
     return newly;
+  }
+
+  // ── Rename handling ──────────────────────────────────────────────
+
+  /**
+   * Updates all git configuration that refers to a submodule's old path
+   * after the folder has been renamed on disk:
+   *   1. `.gitmodules`                    — path and section header
+   *   2. `.git/config`                    — section header (git submodule sync
+   *                                         only updates the URL, not the name)
+   *   3. `.git/modules/<oldPath>/config`  — worktree back-pointer
+   *   4. `.git/modules/<oldPath>/`        — rename the directory itself
+   *   5. working tree `.git` gitfile      — update gitdir pointer
+   *   6. `git submodule sync`             — syncs URL in .git/config as backup
+   *   7. cached GitManager               — evicted so next sync uses new path
+   */
+  async renameSubmodulePath(oldPath: string, newPath: string, configId?: string): Promise<void> {
+    // Helper: renames [submodule "old"] → [submodule "new"] and
+    // any `path = old` / `worktree = ...old` lines in an ini-style file.
+    const renameSectionHeader = (src: string) =>
+      src.replace(
+        new RegExp(`(\\[submodule\\s+")${escapeGitPath(oldPath)}("\\])`, "g"),
+        `$1${newPath}$2`,
+      );
+    const renamePathValue = (src: string) =>
+      src.replace(
+        new RegExp(`(path\\s*=\\s*)${escapeGitPath(oldPath)}`, "g"),
+        `$1${newPath}`,
+      );
+
+    // 1. Update .gitmodules
+    const gitmodulesFile = `${this.vaultPath}/.gitmodules`;
+    if (fs.existsSync(gitmodulesFile)) {
+      let src = fs.readFileSync(gitmodulesFile, "utf8");
+      src = renameSectionHeader(src);
+      src = renamePathValue(src);
+      fs.writeFileSync(gitmodulesFile, src, "utf8");
+    }
+
+    // 2. Update .git/config — git submodule sync only rewrites the URL
+    //    inside an existing section; it does NOT rename the section header
+    //    itself. We must do that manually.
+    const gitConfigFile = `${this.vaultPath}/.git/config`;
+    if (fs.existsSync(gitConfigFile)) {
+      let src = fs.readFileSync(gitConfigFile, "utf8");
+      src = renameSectionHeader(src);
+      fs.writeFileSync(gitConfigFile, src, "utf8");
+    }
+
+    // 3. Fix the worktree back-pointer in the module's own config.
+    //    e.g. worktree = ../../../../Z0-Resources/old-name
+    const moduleCfg = `${this.vaultPath}/.git/modules/${oldPath}/config`;
+    if (fs.existsSync(moduleCfg)) {
+      const lines = fs.readFileSync(moduleCfg, "utf8").split("\n");
+      const updated = lines.map((line) =>
+        /^\s*worktree\s*=/.test(line)
+          ? line.replace(new RegExp(escapeGitPath(oldPath)), newPath)
+          : line
+      );
+      fs.writeFileSync(moduleCfg, updated.join("\n"), "utf8");
+    }
+
+    // 4. Rename the module directory so its name stays consistent with the
+    //    submodule path (purely cosmetic, but avoids a stale old-name dir).
+    const oldModuleDir = `${this.vaultPath}/.git/modules/${oldPath}`;
+    const newModuleDir = `${this.vaultPath}/.git/modules/${newPath}`;
+    if (fs.existsSync(oldModuleDir) && !fs.existsSync(newModuleDir)) {
+      fs.mkdirSync(path.dirname(newModuleDir), { recursive: true });
+      fs.renameSync(oldModuleDir, newModuleDir);
+
+      // 5. Update the .git gitfile inside the working tree to point at the
+      //    renamed module directory.
+      const gitFile = `${this.vaultPath}/${newPath}/.git`;
+      if (fs.existsSync(gitFile)) {
+        const src = fs.readFileSync(gitFile, "utf8");
+        fs.writeFileSync(
+          gitFile,
+          src.replace(
+            new RegExp(`\\.git/modules/${escapeGitPath(oldPath)}`),
+            `.git/modules/${newPath}`,
+          ),
+          "utf8",
+        );
+      }
+    }
+
+    // 6. Evict the cached GitManager so the next sync recreates it with
+    //    the new path instead of running git against the now-gone old path.
+    if (configId) this.gitManagers.delete(configId);
+  }
+
+  // ── .gitmodules as source of truth ──────────────────────────────
+
+  /**
+   * Add `pluginid = <id>` to every .gitmodules entry that doesn't have one
+   * yet. Run once on startup so subsequent reconcile calls can use the stable
+   * id-based lookup instead of fragile path-based matching.
+   */
+  async ensurePluginIds(configs: SubmoduleConfig[]): Promise<void> {
+    const gitmodulesPath = path.join(this.vaultPath, ".gitmodules");
+    if (!fs.existsSync(gitmodulesPath)) return;
+    const isRepo = await this.git.checkIsRepo().catch(() => false);
+    if (!isRepo) return;
+
+    let content = fs.readFileSync(gitmodulesPath, "utf8");
+    const entries = parseGitmodules(content);
+    let changed = false;
+
+    for (const cfg of configs) {
+      const entry = entries.find((e) => e.pluginid === cfg.id || e.path === cfg.localPath);
+      if (!entry || entry.pluginid) continue;
+      // Insert pluginid line right after the [submodule "..."] header.
+      const header = `[submodule "${entry.sectionName}"]`;
+      content = content.replace(header, `${header}\n\tpluginid = ${cfg.id}`);
+      changed = true;
+    }
+
+    if (changed) {
+      fs.writeFileSync(gitmodulesPath, content, "utf8");
+      await this.git.add(".gitmodules").catch(() => {});
+    }
+  }
+
+  /**
+   * Read .gitmodules and return a copy of `configs` with `localPath` and
+   * `remoteUrl` updated to match. Matches entries by `pluginid` first
+   * (stable across renames), falling back to `path` for entries without it.
+   *
+   * Call this after any operation that may have changed .gitmodules on disk
+   * (sync, rename, pull) and after the initial plugin load.
+   */
+  reconcileConfigs(configs: SubmoduleConfig[]): SubmoduleConfig[] {
+    const gitmodulesPath = path.join(this.vaultPath, ".gitmodules");
+    if (!fs.existsSync(gitmodulesPath)) return configs;
+
+    const entries = parseGitmodules(fs.readFileSync(gitmodulesPath, "utf8"));
+    const byPluginId = new Map(entries.filter((e) => e.pluginid).map((e) => [e.pluginid!, e]));
+    const byPath = new Map(entries.filter((e) => e.path).map((e) => [e.path!, e]));
+
+    return configs.map((cfg) => {
+      const entry = byPluginId.get(cfg.id) ?? byPath.get(cfg.localPath);
+      if (!entry) return cfg;
+      const localPath = entry.path ?? cfg.localPath;
+      const remoteUrl = entry.url ?? cfg.remoteUrl;
+      if (localPath === cfg.localPath && remoteUrl === cfg.remoteUrl) return cfg;
+      return { ...cfg, localPath, remoteUrl };
+    });
   }
 
   // ── Rename detection (OS-level renames bypass Obsidian events) ───
@@ -296,6 +448,10 @@ export class SubmoduleManager {
       upstreamBranch: config.upstreamBranch,
       remoteUrl: config.remoteUrl,
       onProgress,
+      // .obsidian/ is a vault-root artifact and must never be committed inside
+      // a submodule, even if Obsidian accidentally creates one there (e.g.
+      // during a folder rename).
+      ignorePatterns: [".obsidian/**"],
     });
     await this.updateParentPointer(config);
     return count;
@@ -414,4 +570,41 @@ export function isValidGitHubUrl(url: string): boolean {
 
 export function normalizeRepoPath(path: string): string {
   return path.replace(/^\/+|\/+$/g, "");
+}
+
+/** Escapes special regex characters in a file-system path for use in RegExp. */
+function escapeGitPath(p: string): string {
+  return p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+interface GitmodulesEntry {
+  sectionName: string;
+  path?: string;
+  url?: string;
+  branch?: string;
+  pluginid?: string;
+}
+
+/**
+ * Parse a .gitmodules file into structured entries.
+ * Handles standard INI format: [submodule "name"] sections with key = value lines.
+ * Unknown keys (like pluginid) are preserved — git ignores them.
+ */
+function parseGitmodules(content: string): GitmodulesEntry[] {
+  const entries: GitmodulesEntry[] = [];
+  let current: GitmodulesEntry | null = null;
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    const section = trimmed.match(/^\[submodule\s+"(.+?)"\]$/);
+    if (section) {
+      if (current) entries.push(current);
+      current = { sectionName: section[1] };
+      continue;
+    }
+    if (!current) continue;
+    const kv = trimmed.match(/^(\w+)\s*=\s*(.+)$/);
+    if (kv) (current as unknown as Record<string, string>)[kv[1]] = kv[2].trim();
+  }
+  if (current) entries.push(current);
+  return entries;
 }

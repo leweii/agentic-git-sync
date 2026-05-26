@@ -41,9 +41,60 @@ export interface RecoveryPlan {
  */
 export function classifyByRules(error: string): RecoveryPlan {
   const m = error.toLowerCase();
+
   if (m.includes("index.lock") || m.includes("another git process") || m.includes("unable to lock ref")) {
     return { tool: "clear_lock", params: {}, reasoning: "Stale lock file blocks git operation", confidence: 5 };
   }
+
+  // Push rejected because remote has commits we haven't merged yet.
+  // Safe fix: pull (merge strategy, not rebase) then let the retry loop push.
+  // This handles the common "first sync" divergence without needing an AI call.
+  // Protected-branch rejections are NOT this case — let those route to the agent.
+  // Local changes to ignored/excluded files block the pull. _doSync already
+  // committed everything the user cares about, so discarding the remaining
+  // tracked changes is safe — the pull will overwrite them with remote content.
+  if (m.includes("would be overwritten by merge") || m.includes("would be overwritten by checkout")) {
+    return {
+      tool: "discard_tracked_changes",
+      params: {},
+      reasoning: "Local changes to non-committed files block pull — discard them so pull can proceed",
+      confidence: 5,
+    };
+  }
+
+  if (
+    (m.includes("non-fast-forward") || m.includes("[rejected]")) &&
+    !m.includes("protected") && !m.includes("declined") && !m.includes("permission")
+  ) {
+    return {
+      tool: "pull_remote",
+      params: {},
+      reasoning: "Remote is ahead — pull to merge remote commits, then the retry loop will push",
+      confidence: 5,
+    };
+  }
+
+  // Branch doesn't exist locally — create and checkout so the retry can push.
+  // Common on first sync of a new branch (local branch never committed yet).
+  if (m.includes("src refspec") && m.includes("does not match")) {
+    return {
+      tool: "checkout_branch",
+      params: {},
+      reasoning: "Branch missing locally — create it so the retry loop can push",
+      confidence: 5,
+    };
+  }
+
+  // HEAD is detached — reattach to target branch so push has a valid ref.
+  if (m.includes("detached") || m.includes("head points to nothing") || m.includes("not a valid object name 'head'")) {
+    return {
+      tool: "checkout_branch",
+      params: {},
+      reasoning: "Detached HEAD — reattach to branch so push has a valid ref",
+      confidence: 5,
+    };
+  }
+
   return { tool: "no_recovery", params: {}, reasoning: "No matching rule — route through agent", confidence: 0 };
 }
 
