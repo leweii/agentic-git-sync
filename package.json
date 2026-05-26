@@ -8,7 +8,7 @@
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "test": "vitest run",
     "test:watch": "vitest",
-    "deploy": "npm run build && mkdir -p \"/Users/jakob/Desktop/Agentic Sync Testing/.obsidian/plugins/agentic-git-sync\" && cp main.js styles.css manifest.json \"/Users/jakob/Desktop/Agentic Sync Testing/.obsidian/plugins/agentic-git-sync/\""
+    "deploy": "npm run build && mkdir -p \"/Users/jakob/Desktop/Agentic Sync Testing/.obsidian/plugins/agentic-git-sync\" && cp main.js styles.css manifest.json \"/Users/jakob/Desktop/Agentic Sync Testing/.obsidian/plugins/agentic-git-sync/\" && mkdir -p \"/Users/jakob/Library/Mobile Documents/iCloud~md~obsidian/Documents/myknowledge/.obsidian/plugins/agentic-git-sync\" && cp main.js styles.css manifest.json \"/Users/jakob/Library/Mobile Documents/iCloud~md~obsidian/Documents/myknowledge/.obsidian/plugins/agentic-git-sync/\""
   },
   "keywords": [],
   "author": "Jakob",

@@ -32,6 +32,15 @@ export interface SyncOptions {
   onProgress?: ProgressFn;
 }
 
+export interface FileCommit {
+  hash: string;
+  date: Date;
+  message: string;
+  authorName: string;
+  /** true = committed on this device; false = pulled from remote */
+  isLocal: boolean;
+}
+
 export class GitConflictError extends Error {
   /**
    * `preExisting` distinguishes a conflict that was already on disk
@@ -827,6 +836,63 @@ export class GitManager {
       await this.git.commit(msg);
     }
     return 1;
+  }
+
+  // ── File history ──────────────────────────────────────────────────
+
+  async getFileHistory(filePath: string, limit = 60): Promise<FileCommit[]> {
+    const [raw, reflogRaw] = await Promise.all([
+      this.git
+        .raw(["log", `--max-count=${limit}`, "--follow", "--format=%H||%ai||%s||%an", "--", filePath])
+        .catch(() => ""),
+      this.git
+        .raw(["reflog", "show", "--format=%H||%gs"])
+        .catch(() => ""),
+    ]);
+
+    // Commits with a "commit:" reflog entry were created on this device.
+    const localHashes = new Set<string>();
+    for (const line of reflogRaw.trim().split("\n")) {
+      const idx = line.indexOf("||");
+      if (idx === -1) continue;
+      const subject = line.slice(idx + 2).trim();
+      if (subject.startsWith("commit:") || subject.startsWith("commit (")) {
+        localHashes.add(line.slice(0, idx).trim());
+      }
+    }
+
+    return raw
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const [hash, date, message, authorName] = line.split("||");
+        const h = hash.trim();
+        return {
+          hash: h,
+          date: new Date(date.trim()),
+          message: message.trim(),
+          authorName: authorName.trim(),
+          isLocal: localHashes.size > 0 ? localHashes.has(h) : true,
+        };
+      });
+  }
+
+  async getFileDiffAtCommit(filePath: string, hash: string): Promise<string> {
+    // Falls back to git-show for the initial commit where hash^ doesn't exist.
+    const diff = await this.git
+      .raw(["diff", `${hash}^`, hash, "--", filePath])
+      .catch(() => this.git.raw(["show", "--format=", hash, "--", filePath]));
+    return diff.replace(/^\n+/, "");
+  }
+
+  async getFileRangeDiff(filePath: string, oldestHash: string, newestHash: string): Promise<string> {
+    // Shows all changes accumulated from before oldestHash up to newestHash.
+    // Falls back to diff without the parent caret for the very first commit.
+    const diff = await this.git
+      .raw(["diff", `${oldestHash}^`, newestHash, "--", filePath])
+      .catch(() => this.git.raw(["diff", oldestHash, newestHash, "--", filePath]));
+    return diff.replace(/^\n+/, "");
   }
 
 }

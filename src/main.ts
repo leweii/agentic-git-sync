@@ -1,4 +1,5 @@
-import { Plugin, Notice, FileSystemAdapter } from "obsidian";
+import { Plugin, Notice, FileSystemAdapter, setIcon, TFolder } from "obsidian";
+import type { TAbstractFile } from "obsidian";
 import { fs, path } from "./node-builtins";
 import { EventLog } from "./observability/EventLog";
 import { GitHubSyncSettings, DEFAULT_SETTINGS, GitHubSyncSettingTab, migrateStaleModels } from "./settings";
@@ -9,6 +10,7 @@ import { SyncScheduler } from "./sync/SyncScheduler";
 import { StatusBar } from "./ui/StatusBar";
 import { SyncDashboard, DASHBOARD_VIEW_TYPE } from "./ui/SyncDashboard";
 import { LocalChangesModal } from "./ui/LocalChangesModal";
+import { FileHistoryModal } from "./ui/FileHistoryModal";
 import { SwitchBranchModal } from "./ui/SwitchBranchModal";
 import { L, tf, setLang } from "./i18n";
 import { friendlyError } from "./errors";
@@ -176,6 +178,18 @@ export default class GitHubSyncPlugin extends Plugin {
       callback: () => this.openLocalChanges(),
     });
 
+    this.addCommand({
+      id: "file-history",
+      name: "Show file history",
+      callback: async () => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file) { new Notice("No active file."); return; }
+        const { gitManager, repoRelativePath } = this.resolveGitContext(file.path);
+        const commits = await gitManager.getFileHistory(repoRelativePath);
+        new FileHistoryModal(this.app, gitManager, repoRelativePath, file.path, commits).open();
+      },
+    });
+
     this.addSettingTab(new GitHubSyncSettingTab(this.app, this));
 
     this.scheduler.start();
@@ -185,7 +199,16 @@ export default class GitHubSyncPlugin extends Plugin {
     this.app.workspace.onLayoutReady(() => {
       void this.refreshStatusBarPending();
       void this.checkExistingConflicts();
+      this.refreshSubmoduleIcons();
     });
+
+    this.registerEvent(
+      this.app.workspace.on("layout-change", () => this.refreshSubmoduleIcons())
+    );
+
+    this.registerEvent(
+      this.app.vault.on("rename", (file, oldPath) => this.handleFolderRename(file, oldPath))
+    );
 
     // Setup wizard no longer auto-pops on plugin load — that's nagging.
     // Users open it from Settings → Agentic Git Sync → "Run setup wizard".
@@ -206,6 +229,20 @@ export default class GitHubSyncPlugin extends Plugin {
 
   private async autoInitSubmodules(): Promise<void> {
     if (this.settings.submodules.length === 0) return;
+
+    // Detect OS-level folder renames (Obsidian's rename event won't fire
+    // for those). Uses the .git gitfile as a stable fingerprint of the
+    // original submodule path.
+    const renames = await this.submoduleManager.detectRenamedPaths(this.settings.submodules);
+    for (const { config, newPath } of renames) {
+      const oldPath = config.localPath;
+      config.localPath = newPath;
+      new Notice(`Git Sync: submodule path updated\n${oldPath} → ${newPath}`);
+    }
+    if (renames.length > 0) {
+      await this.saveSettings();
+    }
+
     const newly = await this.submoduleManager.ensureInitialized(
       this.settings.submodules,
       (msg) => this.statusBar.setPhase("pulling", msg)
@@ -585,7 +622,7 @@ export default class GitHubSyncPlugin extends Plugin {
     const ops = this.getRepoOps(repoId);
     if (!ops) return { ok: false };
 
-    const resolver = new AutoResolver(ops, client, ai.silentMinConfidence);
+    const resolver = new AutoResolver(ops, client, 6 - ai.silentAutonomyLevel);
     const result = await resolver.resolveAll(conflicts);
     if (result.ok !== true) {
       new Notice(
@@ -655,6 +692,62 @@ export default class GitHubSyncPlugin extends Plugin {
     this.scheduler.stop();
     if (this.pendingPollHandle) window.clearInterval(this.pendingPollHandle);
     this.statusBar?.destroy();
+    this.clearSubmoduleIcons();
+  }
+
+  resolveGitContext(vaultRelativePath: string): { gitManager: GitManager; repoRelativePath: string } {
+    for (const sub of this.settings.submodules) {
+      const prefix = sub.localPath.replace(/\/+$/, "") + "/";
+      if (vaultRelativePath.startsWith(prefix)) {
+        return {
+          gitManager: this.submoduleManager.gitManagerFor(sub),
+          repoRelativePath: vaultRelativePath.slice(prefix.length),
+        };
+      }
+    }
+    return { gitManager: this.gitManager, repoRelativePath: vaultRelativePath };
+  }
+
+  private handleFolderRename(file: TAbstractFile, oldPath: string): void {
+    if (!(file instanceof TFolder)) return;
+    let changed = false;
+    for (const sub of this.settings.submodules) {
+      if (sub.localPath === oldPath) {
+        sub.localPath = file.path;
+        changed = true;
+      } else if (sub.localPath.startsWith(oldPath + "/")) {
+        sub.localPath = file.path + sub.localPath.slice(oldPath.length);
+        changed = true;
+      }
+    }
+    if (changed) {
+      void this.saveSettings();
+      new Notice(`Git Sync: submodule path updated\n${oldPath} → ${file.path}`);
+    }
+  }
+
+  private refreshSubmoduleIcons(): void {
+    const subPaths = new Set(this.settings.submodules.map(s => s.localPath));
+    for (const leaf of this.app.workspace.getLeavesOfType("file-explorer")) {
+      const container = leaf.view.containerEl;
+      // Remove stale icons first
+      container.querySelectorAll(".ghs-submodule-icon").forEach(el => el.remove());
+      for (const p of subPaths) {
+        const titleEl = container.querySelector(
+          `.nav-folder[data-path="${CSS.escape(p)}"] > .nav-folder-title`
+        );
+        if (!titleEl) continue;
+        const icon = titleEl.createDiv({ cls: "ghs-submodule-icon" });
+        setIcon(icon, "git-fork");
+        // Insert before the text span so it sits between arrow and label
+        const textSpan = titleEl.querySelector(".nav-folder-title-content");
+        if (textSpan) titleEl.insertBefore(icon, textSpan);
+      }
+    }
+  }
+
+  private clearSubmoduleIcons(): void {
+    document.querySelectorAll(".ghs-submodule-icon").forEach(el => el.remove());
   }
 
   async loadSettings() {
@@ -704,6 +797,7 @@ export default class GitHubSyncPlugin extends Plugin {
       console.warn("[github-sync] couldn't write .github-sync.json:", e);
     }
     this.dashboard?.refreshRepos();
+    this.refreshSubmoduleIcons();
   }
 
   /**

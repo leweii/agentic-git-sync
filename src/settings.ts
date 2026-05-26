@@ -35,7 +35,7 @@ export interface SubmoduleConfig {
 export interface AISettings {
   enabled: boolean;
   silentMode: boolean;
-  silentMinConfidence: number;
+  silentAutonomyLevel: number;
   // Order here reflects the UI / runtime preference order:
   // OpenAI → Gemini → Claude → DeepSeek.
   openaiToken: string;
@@ -147,7 +147,7 @@ export const DEFAULT_SETTINGS: GitHubSyncSettings = {
   ai: {
     enabled: true,
     silentMode: false,
-    silentMinConfidence: 3,
+    silentAutonomyLevel: 3,
     openaiToken: "",
     openaiModel: "gpt-5.5",
     geminiToken: "",
@@ -273,12 +273,12 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
       slider.min = "1";
       slider.max = "5";
       slider.step = "1";
-      slider.value = String(ai.silentMinConfidence);
+      slider.value = String(ai.silentAutonomyLevel);
       const valueEl = tuning.createDiv("ghs-silent-tuning-value");
-      valueEl.setText(String(ai.silentMinConfidence));
+      valueEl.setText(String(ai.silentAutonomyLevel));
       slider.oninput = () => valueEl.setText(slider.value);
       slider.onchange = async () => {
-        this.plugin.settings.ai.silentMinConfidence = parseInt(slider.value, 10);
+        this.plugin.settings.ai.silentAutonomyLevel = parseInt(slider.value, 10);
         await this.plugin.saveSettings();
       };
     }

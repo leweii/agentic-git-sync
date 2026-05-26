@@ -1,3 +1,402 @@
+/* ─── File History — right panel ─────────────────────────────── */
+
+.ghs-gh-section {
+  border-top: 1px solid var(--background-modifier-border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.ghs-gh-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 6px;
+  flex-shrink: 0;
+}
+
+.ghs-gh-icon {
+  display: inline-flex;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.ghs-gh-icon svg { width: 13px; height: 13px; }
+
+.ghs-gh-title {
+  font-size: 0.78em;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.ghs-gh-expand-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  cursor: pointer;
+  color: var(--text-muted);
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.ghs-gh-expand-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.ghs-gh-expand-btn svg { width: 13px; height: 13px; }
+
+.ghs-gh-list {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 60px;
+}
+
+.ghs-gh-empty {
+  padding: 12px;
+  font-size: 0.82em;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.ghs-gh-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background 80ms;
+  user-select: none;
+}
+
+.ghs-gh-row:hover { background: var(--background-modifier-hover); }
+
+.ghs-gh-row.is-selected {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+.ghs-gh-origin-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.ghs-gh-origin-icon svg { width: 10px; height: 10px; }
+.ghs-gh-origin-icon.is-local  { color: var(--color-accent); }
+.ghs-gh-origin-icon.is-remote { color: var(--color-red); }
+
+.ghs-gh-hash {
+  font-family: var(--font-monospace);
+  font-size: 0.75em;
+  color: var(--color-accent);
+  flex: 1;
+}
+
+.ghs-gh-date {
+  font-size: 0.72em;
+  color: var(--text-faint);
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+
+/* ─── File History Modal ──────────────────────────────────────── */
+
+.ghs-fh-modal {
+  width: min(95vw, 1100px) !important;
+  height: min(90vh, 860px) !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.ghs-fh-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 0 !important;
+}
+
+.ghs-fh-header {
+  padding: 8px 20px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+}
+
+.ghs-fh-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.ghs-fh-title-row h3 { margin: 0; font-size: 1em; font-weight: 600; }
+
+.ghs-fh-title-icon { display: inline-flex; color: var(--color-accent); flex-shrink: 0; }
+.ghs-fh-title-icon svg { width: 16px; height: 16px; }
+
+.ghs-fh-subtitle { font-size: 0.8em; color: var(--text-muted); line-height: 1.3; margin-bottom: 1px; }
+.ghs-fh-subtitle-dir { opacity: 0.7; }
+.ghs-fh-subtitle-name { font-weight: 500; color: var(--text-normal); }
+
+.ghs-fh-hint { font-size: 0.72em; color: var(--text-faint); margin-top: 2px; }
+
+/* ── Body: horizontal split ── */
+
+.ghs-fh-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── Commit list ── */
+
+.ghs-fh-list {
+  width: 280px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--background-modifier-border);
+}
+
+.ghs-fh-loading, .ghs-fh-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.87em;
+  margin: 0;
+}
+
+.ghs-fh-error {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-error);
+  font-size: 0.87em;
+  margin: 0;
+}
+
+.ghs-fh-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--background-modifier-border);
+  transition: background 80ms;
+  user-select: none;
+}
+
+.ghs-fh-row:hover { background: var(--background-modifier-hover); }
+
+.ghs-fh-row.is-selected {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+.ghs-fh-origin-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.ghs-fh-origin-icon svg { width: 11px; height: 11px; }
+.ghs-fh-origin-icon.is-local  { color: var(--color-accent); }
+.ghs-fh-origin-icon.is-remote { color: var(--color-red); }
+
+.ghs-fh-message {
+  flex: 1;
+  font-size: 1em;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ghs-fh-hash {
+  font-family: var(--font-monospace);
+  font-size: 0.73em;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.ghs-fh-date {
+  font-size: 0.73em;
+  color: var(--text-faint);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── Diff pane ── */
+
+.ghs-fh-diff-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--background-primary);
+}
+
+.ghs-fh-diff-info-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  background: var(--background-secondary);
+}
+
+.ghs-fh-diff-hash {
+  font-family: var(--font-monospace);
+  font-size: 0.78em;
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.ghs-fh-diff-msg {
+  font-size: 0.85em;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.ghs-fh-diff-author {
+  font-size: 0.78em;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.ghs-fh-copy-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 0.78em;
+  padding: 2px 8px;
+  height: auto;
+  cursor: pointer;
+}
+
+/* ── Stat bar ── */
+
+.ghs-fh-diff-stats {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 16px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+  font-size: 0.75em;
+  font-family: var(--font-monospace);
+  font-weight: 600;
+  background: var(--background-secondary);
+}
+
+.ghs-fh-diff-stats.has-stats { display: flex; }
+
+.ghs-fh-stat-add { color: var(--color-green); }
+.ghs-fh-stat-del { color: var(--color-red); }
+
+/* ── Diff content ── */
+
+.ghs-fh-diff-content {
+  overflow-y: auto;
+  overflow-x: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.ghs-fh-diff-placeholder {
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 0.87em;
+  margin: 0;
+}
+
+/* ── Diff table with line numbers ── */
+
+.ghs-fh-diff-table {
+  font-family: var(--font-monospace);
+  font-size: 0.78em;
+  line-height: 1.55;
+  width: 100%;
+}
+
+.ghs-fh-diff-line {
+  display: grid;
+  grid-template-columns: 40px 40px 1fr;
+}
+
+.ghs-fh-diff-lno {
+  text-align: right;
+  padding: 0 6px;
+  color: var(--text-faint);
+  user-select: none;
+  background: var(--background-secondary);
+  border-right: 1px solid var(--background-modifier-border);
+  font-size: 0.92em;
+}
+
+.ghs-fh-diff-text {
+  padding: 0 12px;
+  white-space: pre;
+}
+
+.ghs-fh-diff-add { background: color-mix(in srgb, var(--color-green) 8%, transparent); }
+.ghs-fh-diff-add .ghs-fh-diff-text { color: var(--color-green); }
+.ghs-fh-diff-del { background: color-mix(in srgb, var(--color-red) 8%, transparent); }
+.ghs-fh-diff-del .ghs-fh-diff-text { color: var(--color-red); }
+.ghs-fh-diff-hunk .ghs-fh-diff-text { color: var(--color-cyan, var(--color-accent)); }
+.ghs-fh-diff-meta .ghs-fh-diff-text { color: var(--text-faint); }
+
+.ghs-fh-diff-empty {
+  padding: 16px 20px;
+  color: var(--text-muted);
+  font-size: 0.87em;
+  margin: 0;
+}
+
+/* ── Footer ── */
+
+.ghs-fh-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 20px;
+  border-top: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+}
+
+/* ─── File explorer: submodule folder icon ────────────────────── */
+
+.ghs-submodule-icon {
+  display: inline-flex;
+  align-items: center;
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.ghs-submodule-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
 /* ─── Wizard ─────────────────────────────────────────────────── */
 
 .ghs-wizard {
@@ -354,7 +753,30 @@
 .ghs-repo-list {
   flex: 1;
   overflow-y: auto;
+  min-height: 0;
 }
+
+.ghs-add-sub-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 8px;
+  margin-bottom: 8px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 0.8em;
+  text-align: left;
+  transition: color 0.12s, background 0.12s;
+}
+.ghs-add-sub-btn:hover {
+  color: var(--color-accent);
+  background: var(--background-modifier-hover);
+}
+.ghs-add-sub-btn svg { width: 12px; height: 12px; }
 
 .ghs-repo-card {
   border-radius: 8px;

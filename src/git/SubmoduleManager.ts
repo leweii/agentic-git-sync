@@ -176,6 +176,73 @@ export class SubmoduleManager {
     return newly;
   }
 
+  // ── Rename detection (OS-level renames bypass Obsidian events) ───
+
+  /**
+   * For each config whose localPath no longer exists on disk, scans the
+   * vault for a folder whose .git gitfile points to
+   * .git/modules/<configuredLocalPath>. That gitfile is written at
+   * submodule-init time and is never updated on a plain folder rename,
+   * making it a reliable fingerprint of the original path.
+   *
+   * Returns pairs of {config, newPath} for every submodule whose new
+   * location was found. The caller is responsible for updating settings.
+   */
+  async detectRenamedPaths(
+    configs: SubmoduleConfig[]
+  ): Promise<Array<{ config: SubmoduleConfig; newPath: string }>> {
+    const missing = configs.filter(
+      (c) => !fs.existsSync(`${this.vaultPath}/${c.localPath}`)
+    );
+    if (missing.length === 0) return [];
+
+    // Collect all .git gitfiles (files, not directories) in the vault.
+    // Skips .git/ dirs and node_modules to keep the scan fast.
+    const gitfiles: string[] = [];
+    const scanDir = (dir: string, depth: number) => {
+      if (depth > 8) return;
+      let entries: string[];
+      try { entries = fs.readdirSync(dir); } catch { return; }
+      for (const name of entries) {
+        if (name === "node_modules") continue;
+        const full = `${dir}/${name}`;
+        try {
+          const stat = fs.statSync(full);
+          if (stat.isDirectory()) {
+            if (name === ".git") continue; // skip .git/ dirs
+            scanDir(full, depth + 1);
+          } else if (name === ".git") {
+            gitfiles.push(full); // .git file inside a submodule
+          }
+        } catch { /* permission errors, broken symlinks */ }
+      }
+    };
+    scanDir(this.vaultPath, 0);
+
+    const results: Array<{ config: SubmoduleConfig; newPath: string }> = [];
+    for (const gitfile of gitfiles) {
+      let content: string;
+      try { content = fs.readFileSync(gitfile, "utf8").trim(); } catch { continue; }
+      // Format: "gitdir: ../.git/modules/folder/sub-folder"
+      const match = content.match(/^gitdir:\s*(.+)$/m);
+      if (!match) continue;
+      const gitdirVal = match[1].trim();
+      // Extract the path after "modules/"
+      const modulesIdx = gitdirVal.indexOf(".git/modules/");
+      if (modulesIdx === -1) continue;
+      const originalPath = gitdirVal.slice(modulesIdx + ".git/modules/".length).replace(/\\/g, "/");
+
+      const cfg = missing.find((c) => c.localPath === originalPath);
+      if (!cfg) continue;
+
+      // The folder containing the .git gitfile is the new submodule root.
+      const newAbsPath = gitfile.slice(0, -"/.git".length);
+      const newPath = newAbsPath.slice(this.vaultPath.length + 1); // relative to vault
+      results.push({ config: cfg, newPath });
+    }
+    return results;
+  }
+
   // ── Git ops: delegated to per-submodule GitManager ───────────────
 
   async listChanges(config: SubmoduleConfig): Promise<PendingChanges> {
@@ -281,6 +348,10 @@ export class SubmoduleManager {
   // ── Private ──────────────────────────────────────────────────────
 
   /** Returns (creating if needed) a GitManager scoped to the submodule path. */
+  gitManagerFor(config: SubmoduleConfig): GitManager {
+    return this.getSubGM(config);
+  }
+
   private getSubGM(config: SubmoduleConfig): GitManager {
     let gm = this.gitManagers.get(config.id);
     if (!gm) {

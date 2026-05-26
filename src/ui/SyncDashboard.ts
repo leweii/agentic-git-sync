@@ -1,8 +1,11 @@
-import { ItemView, Modal, Notice, WorkspaceLeaf, setIcon } from "obsidian";
+import { ItemView, Modal, Notice, WorkspaceLeaf, setIcon, TFile } from "obsidian";
+import type { FileCommit } from "../git/GitManager";
+import type { GitManager } from "../git/GitManager";
 import type GitHubSyncPlugin from "../main";
-import type { PendingChanges, SyncHistoryEntry, SyncPhase, SyncProgress } from "../types";
+import type { PendingChanges, SyncPhase, SyncProgress } from "../types";
 import { VAULT_REPO_ID } from "../types";
 import { AddSubmoduleModal } from "./AddSubmoduleModal";
+import { FileHistoryModal } from "./FileHistoryModal";
 import { ConflictModal } from "./ConflictModal";
 import { SyncPreviewModal } from "./SyncPreviewModal";
 import { timeAgo } from "./StatusBar";
@@ -39,9 +42,20 @@ interface CardRefs {
 export class SyncDashboard extends ItemView {
   private cards = new Map<string, CardRefs>();
   private listEl: HTMLElement | null = null;
-  private historyEl: HTMLElement | null = null;
+  private historyEl: HTMLElement | null = null; // kept for main.ts compat; no longer rendered
   private emptyEl: HTMLElement | null = null;
   private tickHandle: number | null = null;
+
+  // File history panel state
+  private ghSectionEl: HTMLElement | null = null;
+  private ghTitleEl: HTMLElement | null = null;
+  private ghListEl: HTMLElement | null = null;
+  private ghCurrentFile: string | null = null;
+  private ghAnchorIdx: number | null = null;
+  private ghRangeEndIdx: number | null = null;
+  private ghCommits: FileCommit[] = [];
+  private ghGitManager: GitManager | null = null;
+  private ghRepoRelativePath: string | null = null;
 
   constructor(leaf: WorkspaceLeaf, private plugin: GitHubSyncPlugin) {
     super(leaf);
@@ -60,6 +74,12 @@ export class SyncDashboard extends ItemView {
     void this.refreshPendingCounts();
     // Surface any pre-existing merge conflicts immediately on open.
     void this.plugin.checkExistingConflicts();
+
+    // File history: track the active file
+    this.registerEvent(
+      this.app.workspace.on("file-open", (file) => void this.ghRefresh(file))
+    );
+    void this.ghRefresh(this.app.workspace.getActiveFile());
   }
 
   async onClose(): Promise<void> {
@@ -90,10 +110,6 @@ export class SyncDashboard extends ItemView {
   refreshRepos(): void {
     this.render();
     void this.refreshPendingCounts();
-  }
-
-  refreshHistory(): void {
-    if (this.historyEl) this.renderHistory(this.historyEl);
   }
 
   // ── Render (one-time) ────────────────────────────────────────
@@ -172,20 +188,31 @@ export class SyncDashboard extends ItemView {
       };
     }
 
-    // History
-    const historySection = root.createDiv("ghs-history-section");
-    const historyHeader = historySection.createDiv("ghs-history-header");
-    historyHeader.createEl("h5", { text: "Recent activity" });
-    this.historyEl = historySection.createDiv("ghs-history-list");
-    this.renderHistory(this.historyEl);
+    // File History panel section
+    this.ghSectionEl = root.createDiv("ghs-gh-section");
+    const ghHeader = this.ghSectionEl.createDiv("ghs-gh-header");
+    const ghIconWrap = ghHeader.createSpan("ghs-gh-icon");
+    setIcon(ghIconWrap, "history");
+    this.ghTitleEl = ghHeader.createSpan({ cls: "ghs-gh-title", text: "File History" });
+    const expandBtn = ghHeader.createEl("button", { cls: "ghs-gh-expand-btn", attr: { title: "Open in full view" } });
+    setIcon(expandBtn, "maximize-2");
+    expandBtn.onclick = () => this.ghOpenModal();
 
-    // Footer
-    const footer = root.createDiv("ghs-dashboard-footer");
-    const addBtn = footer.createEl("button", { cls: "ghs-add-btn" });
-    const plusIcon = addBtn.createSpan();
-    setIcon(plusIcon, "plus");
-    addBtn.createSpan({ text: "Add Submodule" });
-    addBtn.onclick = () => new AddSubmoduleModal(this.app, this.plugin).open();
+    // Commit list
+    this.ghListEl = this.ghSectionEl.createDiv("ghs-gh-list");
+
+    // Restore displayed file name and commits if a file was already loaded
+    // (render() is called during sync, and we must not wipe the user's view).
+    if (this.ghCurrentFile) {
+      const parts = this.ghCurrentFile.split("/");
+      this.ghTitleEl.textContent = parts[parts.length - 1];
+      this.ghTitleEl.title = this.ghCurrentFile;
+    }
+    if (this.ghCurrentFile && this.ghCommits.length > 0) {
+      this.ghRenderList();
+    } else {
+      this.ghListEl.createDiv({ cls: "ghs-gh-empty", text: "Open a file to see its history." });
+    }
   }
 
   private addCard(state: RepoCardState): void {
@@ -335,27 +362,99 @@ export class SyncDashboard extends ItemView {
     void this.plugin.refreshStatusBarPending();
   }
 
-  // ── History ──────────────────────────────────────────────────
+  // ── File History panel ────────────────────────────────────────
 
-  private renderHistory(parent: HTMLElement): void {
-    parent.empty();
-    const history = this.plugin.settings.syncHistory ?? [];
-    if (history.length === 0) {
-      parent.createDiv({ cls: "ghs-history-empty", text: "No syncs yet." });
+  refreshHistory(): void { /* recent-activity removed; kept for caller compat */ }
+
+  private async ghRefresh(file: TFile | null): Promise<void> {
+    if (!this.ghListEl || !this.ghTitleEl) return;
+    if (!file) return;
+    if (file.path === this.ghCurrentFile) return;
+
+    this.ghCurrentFile = file.path;
+    this.ghAnchorIdx = null;
+    this.ghRangeEndIdx = null;
+    this.ghCommits = [];
+
+    const parts = file.path.split("/");
+    this.ghTitleEl.textContent = parts[parts.length - 1];
+    this.ghTitleEl.title = file.path;
+
+    this.ghListEl.empty();
+    this.ghListEl.createDiv({ cls: "ghs-gh-empty", text: "Loading…" });
+
+    const { gitManager, repoRelativePath } = this.plugin.resolveGitContext(file.path);
+    this.ghGitManager = gitManager;
+    this.ghRepoRelativePath = repoRelativePath;
+
+    try {
+      this.ghCommits = await gitManager.getFileHistory(repoRelativePath);
+    } catch {
+      this.ghListEl.empty();
+      this.ghListEl.createDiv({ cls: "ghs-gh-empty", text: "Failed to load history." });
       return;
     }
-    for (const entry of history.slice(0, 5)) this.renderHistoryRow(parent, entry);
+
+    this.ghRenderList();
   }
 
-  private renderHistoryRow(parent: HTMLElement, entry: SyncHistoryEntry): void {
-    const row = parent.createDiv(`ghs-history-row ${entry.status}`);
-    const iconWrap = row.createSpan("ghs-history-icon");
-    setIcon(iconWrap, entry.status === "success" ? "check-circle" : "alert-circle");
-    const body = row.createDiv("ghs-history-body");
-    const top = body.createDiv("ghs-history-top");
-    top.createSpan({ cls: "ghs-history-repo", text: entry.repoLabel });
-    top.createSpan({ cls: "ghs-history-time", text: timeAgo(entry.time) });
-    body.createDiv({ cls: "ghs-history-msg", text: entry.message });
+  private ghSelectedRange(): [number, number] | null {
+    if (this.ghAnchorIdx === null) return null;
+    const end = this.ghRangeEndIdx ?? this.ghAnchorIdx;
+    return [Math.min(this.ghAnchorIdx, end), Math.max(this.ghAnchorIdx, end)];
+  }
+
+  private ghRenderList(): void {
+    if (!this.ghListEl) return;
+    this.ghListEl.empty();
+
+    if (this.ghCommits.length === 0) {
+      this.ghListEl.createDiv({ cls: "ghs-gh-empty", text: "No commits found for this file." });
+      return;
+    }
+
+    const range = this.ghSelectedRange();
+    for (let i = 0; i < this.ghCommits.length; i++) {
+      const selected = range !== null && i >= range[0] && i <= range[1];
+      this.ghRenderCommitRow(this.ghListEl, this.ghCommits[i], i, selected);
+    }
+  }
+
+  private ghRenderCommitRow(container: HTMLElement, commit: FileCommit, idx: number, selected: boolean): void {
+    const row = container.createDiv("ghs-gh-row");
+    if (selected) row.addClass("is-selected");
+
+    const originIcon = row.createSpan({ cls: "ghs-gh-origin-icon" });
+    originIcon.setAttribute("aria-label", commit.isLocal ? "Local commit" : "Pulled from remote");
+    setIcon(originIcon, commit.isLocal ? "upload" : "download");
+    originIcon.addClass(commit.isLocal ? "is-local" : "is-remote");
+
+    row.createSpan({ cls: "ghs-gh-hash", text: commit.hash.slice(0, 7) });
+    row.createSpan({ cls: "ghs-gh-date", text: ghFormatDate(commit.date) });
+
+    row.addEventListener("click", (e: MouseEvent) => {
+      if (e.shiftKey && this.ghAnchorIdx !== null) {
+        this.ghRangeEndIdx = idx;
+      } else {
+        this.ghAnchorIdx = idx;
+        this.ghRangeEndIdx = null;
+      }
+      this.ghRenderList();
+      this.ghOpenModal();
+    });
+  }
+
+  private ghOpenModal(): void {
+    if (!this.ghGitManager || !this.ghRepoRelativePath || !this.ghCurrentFile) return;
+    new FileHistoryModal(
+      this.app,
+      this.ghGitManager,
+      this.ghRepoRelativePath,
+      this.ghCurrentFile,
+      this.ghCommits,
+      this.ghAnchorIdx,
+      this.ghRangeEndIdx,
+    ).open();
   }
 
   // ── Actions ──────────────────────────────────────────────────
@@ -521,6 +620,26 @@ class RemoveSubmoduleModal extends Modal {
   onClose(): void {
     this.contentEl.empty();
   }
+}
+
+function ghFormatDate(date: Date): string {
+  const now = new Date();
+  const diff = now.getTime() - date.getTime();
+  const mins = Math.floor(diff / 60_000);
+  const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const dateStr = date.getFullYear() === now.getFullYear()
+    ? `${MONTHS[date.getMonth()]} ${date.getDate()}`
+    : `${MONTHS[date.getMonth()]} '${String(date.getFullYear()).slice(2)}`;
+  if (mins < 1) return `${dateStr} · just now`;
+  if (mins < 60) return `${dateStr} · ${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  if (hrs < 24) return `${dateStr} · ${hrs}h ${remMins}m ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${dateStr} · ${days}d ago`;
+  const mos = Math.floor(days / 30);
+  if (mos < 12) return `${dateStr} · ${mos}mo ago`;
+  return `${dateStr} · ${Math.floor(mos / 12)}y ago`;
 }
 
 function isInFlight(p: SyncPhase): boolean {

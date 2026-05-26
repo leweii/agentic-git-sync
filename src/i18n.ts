@@ -98,11 +98,11 @@ const en = {
     sectionAIPrefs:      "AI preferences",
     sectionAIPrefsDesc:  "Personal preference — not shared via the repo.",
     silentTitle:         "Smart sync — auto-merge with AI",
-    silentDesc:          "AI resolves conflicts in the background during sync. Low-confidence cases fall back to a manual review.",
+    silentDesc:          "AI resolves conflicts in the background during sync. Cases below the autonomy threshold fall back to a manual review.",
     silentBadgeReady:    "AI ready",
     silentBadgeNoKey:    "No AI provider configured",
-    confidenceLabel:     "Confidence threshold",
-    confidenceDesc:      "Minimum AI confidence (1–5) to auto-resolve. Below this, falls back to the manual modal.",
+    confidenceLabel:     "AI autonomy level",
+    confidenceDesc:      "How autonomously AI handles conflicts (1–5). Higher = AI resolves more automatically; lower = more cases go to manual review.",
 
     aiSetupTitle:        "Enable smart sync",
     aiSetupDesc:         "Smart sync needs at least one AI provider key. Both are stored only on this device.",
@@ -367,6 +367,14 @@ const en = {
     syncedOnNewBranch:  "Synced to '{0}'.",
     failed:             "Couldn't switch branch: {0}",
   },
+
+  fileHistory: {
+    title:        "File History",
+    loading:      "Loading…",
+    empty:        "No commits found for this file.",
+    errorLoading: "Failed to load: {0}",
+    copyHash:     "Copy hash",
+  },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -452,8 +460,8 @@ const zh: typeof en = {
     silentDesc:          "同步时 AI 在后台解决冲突。置信度不足时自动回退到手动审阅。",
     silentBadgeReady:    "AI 已就绪",
     silentBadgeNoKey:    "未配置 AI Provider",
-    confidenceLabel:     "置信度阈值",
-    confidenceDesc:      "触发自动解决的最低 AI 置信度（1–5），低于此值则弹窗手动处理。",
+    confidenceLabel:     "AI 自主程度",
+    confidenceDesc:      "AI 自动处理冲突的积极程度（1–5）。越高越自主，越低则越多场景转为手动处理。",
 
     aiSetupTitle:        "启用智能同步",
     aiSetupDesc:         "智能同步至少需要一个 AI Provider Key。所有 key 仅保存在本机。",
@@ -718,6 +726,14 @@ const zh: typeof en = {
     syncedOnNewBranch:  "已同步到 '{0}'。",
     failed:             "切换分支失败：{0}",
   },
+
+  fileHistory: {
+    title:        "文件历史",
+    loading:      "加载中…",
+    empty:        "该文件暂无提交记录。",
+    errorLoading: "加载失败：{0}",
+    copyHash:     "复制哈希",
+  },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -803,8 +819,8 @@ const zhTw: typeof en = {
     silentDesc:          "同步時 AI 在背景解決衝突。信心度不足時自動退回手動審核。",
     silentBadgeReady:    "AI 已就緒",
     silentBadgeNoKey:    "未設定 AI 提供者",
-    confidenceLabel:     "信心度門檻",
-    confidenceDesc:      "觸發自動解決的最低 AI 信心度(1–5),低於此值則彈窗手動處理。",
+    confidenceLabel:     "AI 自主程度",
+    confidenceDesc:      "AI 自動處理衝突的積極程度（1–5）。越高越自主，越低則越多情境轉為手動處理。",
 
     aiSetupTitle:        "啟用智慧同步",
     aiSetupDesc:         "智慧同步至少需要一個 AI 提供者金鑰。所有金鑰僅保存在本機。",
@@ -1069,6 +1085,14 @@ const zhTw: typeof en = {
     syncedOnNewBranch:  "已同步到 '{0}'。",
     failed:             "切換分支失敗:{0}",
   },
+
+  fileHistory: {
+    title:        "檔案歷史",
+    loading:      "載入中…",
+    empty:        "此檔案尚無提交記錄。",
+    errorLoading: "載入失敗：{0}",
+    copyHash:     "複製雜湊值",
+  },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1154,8 +1178,8 @@ const ja: typeof en = {
     silentDesc:          "同期中、AI がバックグラウンドでコンフリクトを解決します。確信度が低い場合は手動レビューに戻します。",
     silentBadgeReady:    "AI 利用可能",
     silentBadgeNoKey:    "AI プロバイダ未設定",
-    confidenceLabel:     "確信度しきい値",
-    confidenceDesc:      "自動解決の最小 AI 確信度 (1–5)。これ未満は手動モーダルにフォールバックします。",
+    confidenceLabel:     "AI 自律度",
+    confidenceDesc:      "AI が自動でコンフリクトを処理する積極性 (1–5)。高いほど自律的、低いほど多くのケースを手動確認へ。",
 
     aiSetupTitle:        "スマート同期を有効化",
     aiSetupDesc:         "スマート同期には少なくとも 1 つの AI プロバイダキーが必要です。すべてこのデバイスにのみ保存されます。",
@@ -1419,5 +1443,13 @@ const ja: typeof en = {
     switchedTo:         "ブランチ '{0}' は既に存在します。切り替えています…",
     syncedOnNewBranch:  "'{0}' に同期しました。",
     failed:             "ブランチ切り替えに失敗: {0}",
+  },
+
+  fileHistory: {
+    title:        "ファイル履歴",
+    loading:      "読み込み中…",
+    empty:        "このファイルのコミット履歴はありません。",
+    errorLoading: "読み込み失敗: {0}",
+    copyHash:     "ハッシュをコピー",
   },
 };

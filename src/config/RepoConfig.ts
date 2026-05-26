@@ -114,7 +114,7 @@ export function settingsToRepoConfig(s: GitHubSyncSettings): RepoConfigV1 {
     ai: {
       enabled: s.ai.enabled,
       silentMode: s.ai.silentMode,
-      silentMinConfidence: s.ai.silentMinConfidence,
+      silentMinConfidence: 6 - s.ai.silentAutonomyLevel,
       openaiModel: s.ai.openaiModel,
       geminiModel: s.ai.geminiModel,
       claudeModel: s.ai.claudeModel,
@@ -152,7 +152,7 @@ export function applyRepoConfig(
       ...s.ai,
       enabled: cfg.ai.enabled,
       silentMode: cfg.ai.silentMode,
-      silentMinConfidence: cfg.ai.silentMinConfidence,
+      silentAutonomyLevel: 6 - cfg.ai.silentMinConfidence,
       openaiModel: cfg.ai.openaiModel,
       geminiModel: cfg.ai.geminiModel,
       claudeModel: cfg.ai.claudeModel,
