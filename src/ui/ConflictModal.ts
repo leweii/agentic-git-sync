@@ -12,6 +12,7 @@ import {
   type ConflictSegment,
   type HunkResolution,
 } from "../sync/ConflictParser";
+import { L, tf } from "../i18n";
 
 type AIHunkState =
   | { kind: "idle" }
@@ -61,7 +62,7 @@ export class ConflictModal extends Modal {
   async onOpen(): Promise<void> {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createDiv({ cls: "ghs-cv2-loading", text: "Loading conflicts…" });
+    contentEl.createDiv({ cls: "ghs-cv2-loading", text: L().conflict.loading });
     await this.loadFiles();
     this.render();
     this.maybeTriggerAI();
@@ -90,7 +91,7 @@ export class ConflictModal extends Modal {
           persisted: false,
         });
       } catch (e) {
-        new Notice(`Couldn't load ${path}: ${(e as Error).message}`);
+        new Notice(tf(L().conflict.noticeLoadFailed, path, (e as Error).message));
       }
     }
   }
@@ -208,24 +209,21 @@ export class ConflictModal extends Modal {
       // back, and offer an explicit `git merge --abort` for the case
       // where MERGE_HEAD is still pending under the surface.
       const empty = contentEl.createDiv("ghs-cv2-empty");
-      empty.createEl("p", { text: "No conflict markers found in the listed files." });
+      empty.createEl("p", { text: L().conflict.noMarkersTitle });
       empty.createEl("p", {
         cls: "ghs-cv2-empty-sub",
-        text:
-          "The merge was likely resolved or aborted elsewhere. " +
-          "Closing this dialog will clear the conflict card. " +
-          "If a merge is still pending in git, use Abort merge to clean it up.",
+        text: L().conflict.noMarkersDesc,
       });
       const actions = empty.createDiv("ghs-cv2-empty-actions");
 
-      const abortBtn = actions.createEl("button", { text: "Abort merge" });
+      const abortBtn = actions.createEl("button", { text: L().conflict.abortMerge });
       abortBtn.onclick = async () => {
         abortBtn.disabled = true;
         try {
           await this.ops.abortMerge();
-          new Notice("Aborted any pending merge.");
+          new Notice(L().conflict.noticeAborted);
         } catch (e) {
-          new Notice(`Couldn't abort: ${(e as Error).message}`, 8000);
+          new Notice(tf(L().conflict.noticeAbortFailed, (e as Error).message), 8000);
         }
         this.onResolved();
         this.close();
@@ -235,7 +233,7 @@ export class ConflictModal extends Modal {
       // a fresh sync, all in one click. Surfaces only when the caller wired
       // a resync callback (dashboard does; setup wizard doesn't).
       if (this.onForceResync) {
-        const forceBtn = actions.createEl("button", { text: "Force clean & resync", cls: "mod-cta" });
+        const forceBtn = actions.createEl("button", { text: L().conflict.forceCleanResync, cls: "mod-cta" });
         forceBtn.onclick = async () => {
           forceBtn.disabled = true;
           abortBtn.disabled = true;
@@ -243,15 +241,15 @@ export class ConflictModal extends Modal {
             await this.ops.abortMerge();
             this.onResolved();
             this.close();
-            new Notice("Cleaned merge state — resyncing…");
+            new Notice(L().conflict.noticeCleanedResyncing);
             await this.onForceResync!();
           } catch (e) {
-            new Notice(`Force clean failed: ${(e as Error).message}`, 8000);
+            new Notice(tf(L().conflict.noticeForceCleanFailed, (e as Error).message), 8000);
           }
         };
       }
 
-      const closeBtn = actions.createEl("button", { text: "Close" });
+      const closeBtn = actions.createEl("button", { text: L().common.close });
       closeBtn.onclick = () => {
         this.onResolved();
         this.close();
@@ -277,39 +275,39 @@ export class ConflictModal extends Modal {
     const top = header.createDiv("ghs-cv2-header-top");
     const titleWrap = top.createDiv("ghs-cv2-title");
     if (!this.allResolved()) {
-      titleWrap.createSpan({ cls: "ghs-cv2-title-prefix", text: "Conflicts /" });
+      titleWrap.createSpan({ cls: "ghs-cv2-title-prefix", text: L().conflict.conflictsPrefix });
       titleWrap.createSpan({ cls: "ghs-cv2-filename", text: this.file().path });
       if (this.editMode) {
-        titleWrap.createSpan({ cls: "ghs-cv2-edit-badge", text: "EDITING" });
+        titleWrap.createSpan({ cls: "ghs-cv2-edit-badge", text: L().conflict.editing });
       }
     } else {
       titleWrap.createSpan({
         cls: "ghs-cv2-filename",
-        text: `All files resolved · ${this.files.length}/${this.files.length}`,
+        text: tf(L().conflict.allResolvedHeader, this.files.length, this.files.length),
       });
     }
     top.createDiv({ cls: "ghs-cv2-spacer" });
 
-    const closeBtn = top.createEl("button", { cls: "ghs-cv2-icon-btn", attr: { title: "Close" } });
+    const closeBtn = top.createEl("button", { cls: "ghs-cv2-icon-btn", attr: { title: L().common.close } });
     setIcon(closeBtn, "x");
     closeBtn.onclick = () => this.close();
 
     const meta = header.createDiv("ghs-cv2-header-meta");
-    meta.createSpan({ text: `Repo ${this.repoLabel}` });
+    meta.createSpan({ text: tf(L().conflict.repoPrefix, this.repoLabel) });
     meta.createSpan({ cls: "ghs-cv2-dot", text: "·" });
-    meta.createSpan({ text: this.allResolved() ? "merge ready" : "merge in progress" });
+    meta.createSpan({ text: this.allResolved() ? L().conflict.mergeReady : L().conflict.mergeInProgress });
     if (this.aiAvailable() && !this.allResolved()) {
       meta.createSpan({ cls: "ghs-cv2-dot", text: "·" });
       const aiTag = meta.createSpan({ cls: "ghs-cv2-ai-tag" });
       const icon = aiTag.createSpan({ cls: "ghs-cv2-ai-tag-icon" });
       setIcon(icon, "sparkles");
-      aiTag.createSpan({ text: this.aiAllowedForCurrentFile() ? "AI enabled" : "AI excluded for this path" });
+      aiTag.createSpan({ text: this.aiAllowedForCurrentFile() ? L().conflict.aiEnabled : L().conflict.aiExcluded });
     }
   }
 
   private renderFilesPane(parent: HTMLElement): void {
     const pane = parent.createDiv("ghs-cv2-files-pane");
-    pane.createEl("h4", { text: `Files (${this.files.length})` });
+    pane.createEl("h4", { text: tf(L().conflict.filesCount, this.files.length) });
     const list = pane.createDiv("ghs-cv2-file-list");
     for (let i = 0; i < this.files.length; i++) {
       const f = this.files[i];
@@ -321,7 +319,7 @@ export class ConflictModal extends Modal {
       row.createSpan({ cls: "ghs-cv2-file-name", text: f.path });
       row.onclick = () => {
         if (this.editMode) {
-          new Notice("Save or cancel edit first.");
+          new Notice(L().conflict.saveEditFirst);
           return;
         }
         this.currentFile = i;
@@ -331,12 +329,13 @@ export class ConflictModal extends Modal {
       };
     }
 
+    const t = L().conflict;
     const legend = pane.createDiv("ghs-cv2-legend");
     for (const [sym, label, cls] of [
-      ["●", "current", "current"],
-      ["✗", "unresolved", "unresolved"],
-      ["◐", "partial", "partial"],
-      ["✓", "resolved", "clean"],
+      ["●", t.legendCurrent, "current"],
+      ["✗", t.legendUnresolved, "unresolved"],
+      ["◐", t.legendPartial, "partial"],
+      ["✓", t.legendResolved, "clean"],
     ] as const) {
       const row = legend.createDiv("ghs-cv2-legend-row");
       row.createSpan({ cls: `ghs-cv2-file-badge ${cls}`, text: sym });
@@ -348,24 +347,28 @@ export class ConflictModal extends Modal {
     const main = parent.createDiv("ghs-cv2-main-pane");
     const ai = this.aiState();
 
+    const t = L().conflict;
+
     // Hunk nav
     const nav = main.createDiv("ghs-cv2-hunk-nav");
     nav.createEl("span", {
       cls: "ghs-cv2-hunk-label",
-      text: `Hunk ${this.currentHunk + 1} of ${this.file().hunks.length}${this.editMode ? " — editing" : ""}`,
+      text: this.editMode
+        ? tf(t.hunkEditing, this.currentHunk + 1, this.file().hunks.length)
+        : tf(t.hunkOf, this.currentHunk + 1, this.file().hunks.length),
     });
     const navBtns = nav.createDiv("ghs-cv2-nav-btns");
-    const prev = navBtns.createEl("button", { cls: "ghs-cv2-nav-btn", text: "Prev" });
+    const prev = navBtns.createEl("button", { cls: "ghs-cv2-nav-btn", text: t.prev });
     prev.disabled = this.currentHunk === 0 || this.editMode;
     prev.onclick = () => { this.currentHunk--; this.render(); this.maybeTriggerAI(); };
-    const next = navBtns.createEl("button", { cls: "ghs-cv2-nav-btn", text: "Next" });
+    const next = navBtns.createEl("button", { cls: "ghs-cv2-nav-btn", text: t.next });
     next.disabled = this.currentHunk >= this.file().hunks.length - 1 || this.editMode;
     next.onclick = () => { this.currentHunk++; this.render(); this.maybeTriggerAI(); };
 
     // Confidence (only when AI result available)
     if (ai.kind === "result") {
       const conf = nav.createDiv("ghs-cv2-confidence");
-      conf.createSpan({ cls: "ghs-cv2-conf-label", text: "AI confidence:" });
+      conf.createSpan({ cls: "ghs-cv2-conf-label", text: t.aiConfidence });
       const dots = conf.createDiv("ghs-cv2-conf-dots");
       for (let i = 0; i < 5; i++) {
         dots.createDiv({ cls: `ghs-cv2-conf-dot ${i < ai.suggestion.confidence ? "on" : ""}` });
@@ -380,9 +383,9 @@ export class ConflictModal extends Modal {
         resolutionTag.setText(`✓ ${resolutionLabel(currentResolution.kind)}`);
       } else if (currentResolution?.kind === "skip") {
         resolutionTag.addClass("skipped");
-        resolutionTag.setText("○ skipped");
+        resolutionTag.setText(t.skippedTag);
       } else {
-        resolutionTag.setText("Unresolved");
+        resolutionTag.setText(t.unresolvedTag);
       }
     }
 
@@ -391,53 +394,53 @@ export class ConflictModal extends Modal {
       const banner = main.createDiv("ghs-cv2-low-conf-banner");
       const icon = banner.createSpan({ cls: "ghs-cv2-banner-icon" });
       setIcon(icon, "alert-triangle");
-      banner.createSpan({ cls: "ghs-cv2-banner-title", text: "AI uncertain on this hunk" });
+      banner.createSpan({ cls: "ghs-cv2-banner-title", text: t.aiUncertain });
       banner.createSpan({
         cls: "ghs-cv2-banner-body",
-        text: " — please review the suggestion carefully before accepting.",
+        text: t.aiUncertainNote,
       });
     }
 
     // Three-pane diff
     const grid = main.createDiv("ghs-cv2-diff-grid");
     const dimSides = ai.kind === "result";
-    this.renderDiffPane(grid, "Local", "local", this.hunk().local, dimSides);
-    this.renderDiffPane(grid, "Remote", "remote", this.hunk().remote, dimSides);
+    this.renderDiffPane(grid, t.resolutionLocal, "local", this.hunk().local, dimSides);
+    this.renderDiffPane(grid, t.resolutionRemote, "remote", this.hunk().remote, dimSides);
     if (this.editMode) this.renderEditPane(grid);
     else this.renderAiPane(grid, ai);
 
     // Hunk actions
     const actions = main.createDiv("ghs-cv2-hunk-actions");
     if (this.editMode) {
-      const cancelEdit = actions.createEl("button", { cls: "ghs-cv2-ghost-btn", text: "Cancel" });
+      const cancelEdit = actions.createEl("button", { cls: "ghs-cv2-ghost-btn", text: L().common.cancel });
       cancelEdit.onclick = () => { this.editMode = false; this.render(); };
       actions.createDiv({ cls: "ghs-cv2-spacer" });
-      const save = actions.createEl("button", { cls: "ghs-cv2-action-btn primary", text: "Save edit" });
+      const save = actions.createEl("button", { cls: "ghs-cv2-action-btn primary", text: t.saveEdit });
       save.onclick = () => this.commitEdit();
     } else {
-      this.actionBtn(actions, "Take Local", () => this.applyHunk({ kind: "local" }));
-      this.actionBtn(actions, "Take Remote", () => this.applyHunk({ kind: "remote" }));
+      this.actionBtn(actions, t.takeLocal, () => this.applyHunk({ kind: "local" }));
+      this.actionBtn(actions, t.takeRemote, () => this.applyHunk({ kind: "remote" }));
 
-      const takeAi = actions.createEl("button", { cls: "ghs-cv2-action-btn primary", text: "Take AI" });
+      const takeAi = actions.createEl("button", { cls: "ghs-cv2-action-btn primary", text: t.takeAi });
       if (ai.kind === "result") {
         const star = takeAi.createSpan({ cls: "ghs-cv2-star-glyph", text: "★" });
         void star;
         takeAi.onclick = () => this.applyHunk({ kind: "edit", text: ai.suggestion.merged.join("\n") });
       } else if (ai.kind === "thinking") {
         takeAi.disabled = true;
-        takeAi.title = "AI is generating a suggestion…";
+        takeAi.title = t.tipAiThinking;
       } else if (ai.kind === "error") {
         takeAi.disabled = true;
-        takeAi.title = "AI failed — retry or resolve manually";
+        takeAi.title = t.tipAiFailed;
       } else {
         takeAi.disabled = true;
         takeAi.title = !this.aiAvailable()
-          ? "Configure an AI provider in Settings → AI"
-          : "AI excluded for this path";
+          ? t.tipAiConfigure
+          : t.aiExcluded;
       }
 
-      this.actionBtn(actions, "Edit manually", () => this.enterEditMode());
-      this.actionBtn(actions, "Skip hunk", () => this.applyHunk({ kind: "skip" }), "ghs-cv2-ghost-btn");
+      this.actionBtn(actions, t.editManually, () => this.enterEditMode());
+      this.actionBtn(actions, t.skipHunk, () => this.applyHunk({ kind: "skip" }), "ghs-cv2-ghost-btn");
     }
 
     // Reasoning panel
@@ -450,7 +453,7 @@ export class ConflictModal extends Modal {
     header.createSpan({ cls: "ghs-cv2-pane-title", text: title });
     const body = pane.createDiv("ghs-cv2-pane-body");
     if (lines.length === 0) {
-      body.createDiv({ cls: "ghs-cv2-pane-placeholder", text: "(empty — this side has no content)" });
+      body.createDiv({ cls: "ghs-cv2-pane-placeholder", text: L().conflict.emptyLocal });
       return;
     }
     for (let i = 0; i < lines.length; i++) {
@@ -462,11 +465,12 @@ export class ConflictModal extends Modal {
   }
 
   private renderAiPane(parent: HTMLElement, state: AIHunkState): void {
+    const t = L().conflict;
     const pane = parent.createDiv("ghs-cv2-pane ai");
     const header = pane.createDiv("ghs-cv2-pane-header");
     const icon = header.createSpan({ cls: "ghs-cv2-pane-icon" });
     setIcon(icon, "sparkles");
-    header.createSpan({ cls: "ghs-cv2-pane-title", text: "AI Suggestion" });
+    header.createSpan({ cls: "ghs-cv2-pane-title", text: t.aiSuggestion });
 
     if (state.kind === "result") {
       header.createSpan({ cls: "ghs-cv2-pane-meta", text: state.providerName });
@@ -485,11 +489,11 @@ export class ConflictModal extends Modal {
     }
 
     if (state.kind === "thinking") {
-      header.createSpan({ cls: "ghs-cv2-pane-meta", text: "thinking…" });
+      header.createSpan({ cls: "ghs-cv2-pane-meta", text: t.aiThinking });
       const body = pane.createDiv("ghs-cv2-pane-body ghs-cv2-ai-thinking");
       const overlay = body.createDiv("ghs-cv2-thinking-overlay");
       overlay.createDiv("ghs-cv2-spinner");
-      overlay.createDiv({ cls: "ghs-cv2-thinking-text", text: "Generating merge…" });
+      overlay.createDiv({ cls: "ghs-cv2-thinking-text", text: t.aiGenerating });
       // Skeleton lines underneath for visual stability
       for (let i = 0; i < 4; i++) {
         const line = body.createDiv("ghs-cv2-skeleton-line");
@@ -502,33 +506,31 @@ export class ConflictModal extends Modal {
 
     if (state.kind === "error") {
       header.addClass("error");
-      header.createSpan({ cls: "ghs-cv2-pane-meta error-meta", text: "failed" });
+      header.createSpan({ cls: "ghs-cv2-pane-meta error-meta", text: t.aiFailed });
       const body = pane.createDiv("ghs-cv2-pane-body");
       const card = body.createDiv("ghs-cv2-error-card");
       const cardHeader = card.createDiv("ghs-cv2-error-card-header");
       const cardIcon = cardHeader.createSpan({ cls: "ghs-cv2-error-icon" });
       setIcon(cardIcon, "alert-circle");
-      cardHeader.createSpan({ text: "AI Suggestion failed" });
+      cardHeader.createSpan({ text: t.aiSuggestionFailed });
       card.createDiv({ cls: "ghs-cv2-error-card-body", text: truncate(state.message, 280) });
 
       const actions = card.createDiv("ghs-cv2-error-card-actions");
-      const retry = actions.createEl("button", { cls: "ghs-cv2-action-btn", text: "Retry" });
+      const retry = actions.createEl("button", { cls: "ghs-cv2-action-btn", text: L().common.retry });
       retry.onclick = () => this.retryAI();
-      const fallback = actions.createEl("button", { cls: "ghs-cv2-action-btn", text: "Resolve manually" });
+      const fallback = actions.createEl("button", { cls: "ghs-cv2-action-btn", text: t.resolveManually });
       fallback.onclick = () => this.enterEditMode();
       return;
     }
 
     // idle / disabled
-    header.createSpan({ cls: "ghs-cv2-pane-meta", text: "not configured" });
+    header.createSpan({ cls: "ghs-cv2-pane-meta", text: t.aiNotConfigured });
     const body = pane.createDiv("ghs-cv2-pane-body ghs-cv2-ai-empty");
     const emptyIcon = body.createDiv("ghs-cv2-ai-empty-icon");
     setIcon(emptyIcon, "sparkles");
     body.createDiv({
       cls: "ghs-cv2-ai-empty-text",
-      text: !this.aiAvailable()
-        ? "Configure a provider in Settings → AI to enable automatic merge suggestions."
-        : "AI is excluded for this file by your privacy settings.",
+      text: !this.aiAvailable() ? t.aiEmptyConfigure : t.aiEmptyExcluded,
     });
   }
 
@@ -537,8 +539,8 @@ export class ConflictModal extends Modal {
     const header = pane.createDiv("ghs-cv2-pane-header");
     const icon = header.createSpan({ cls: "ghs-cv2-pane-icon" });
     setIcon(icon, "pencil");
-    header.createSpan({ cls: "ghs-cv2-pane-title", text: "Manual edit" });
-    header.createSpan({ cls: "ghs-cv2-pane-meta unsaved", text: "● unsaved" });
+    header.createSpan({ cls: "ghs-cv2-pane-title", text: L().conflict.manualEdit });
+    header.createSpan({ cls: "ghs-cv2-pane-meta unsaved", text: L().conflict.unsaved });
 
     const ta = pane.createEl("textarea", { cls: "ghs-cv2-edit-textarea" });
     ta.spellcheck = false;
@@ -559,42 +561,43 @@ export class ConflictModal extends Modal {
     const hint = pane.createDiv({ cls: "ghs-cv2-edit-hint" });
     // eslint-disable-next-line obsidianmd/ui/sentence-case -- "Enter" is a key name
     hint.createEl("kbd", { text: "⌘ Enter" });
-    hint.appendText(" save · ");
+    hint.appendText(L().conflict.kbdSave);
     hint.createEl("kbd", { text: "Esc" });
-    hint.appendText(" cancel");
+    hint.appendText(L().conflict.kbdCancel);
   }
 
   private renderReasoning(parent: HTMLElement, state: AIHunkState): void {
+    const t = L().conflict;
     const reasoning = parent.createDiv("ghs-cv2-reasoning");
     const header = reasoning.createDiv("ghs-cv2-reasoning-header");
     const icon = header.createSpan({ cls: "ghs-cv2-reasoning-icon" });
 
     if (state.kind === "result") {
       setIcon(icon, "sparkles");
-      header.createSpan({ text: "AI reasoning" });
+      header.createSpan({ text: t.aiReasoning });
       const list = reasoning.createEl("ul", { cls: "ghs-cv2-reasoning-list" });
       for (const r of state.suggestion.reasoning) {
         list.createEl("li", { text: r });
       }
       const info = reasoning.createDiv("ghs-cv2-model-info");
-      info.createSpan({ text: `Model: ${state.suggestion.model}` });
+      info.createSpan({ text: tf(t.modelInfo, state.suggestion.model) });
       info.createSpan({
-        text: `${state.suggestion.inputTokens} in / ${state.suggestion.outputTokens} out`,
+        text: tf(t.tokensInOut, state.suggestion.inputTokens, state.suggestion.outputTokens),
       });
       const cost = state.suggestion.costUsd;
       info.createSpan({
         cls: "ghs-cv2-cost",
-        text: cost > 0 ? `~$${cost.toFixed(4)}` : "free tier",
+        text: cost > 0 ? `~$${cost.toFixed(4)}` : t.freeTier,
       });
       return;
     }
 
     if (state.kind === "thinking") {
       icon.appendChild(this.contentEl.createDiv("ghs-cv2-spinner-sm"));
-      header.createSpan({ text: "AI is thinking…" });
+      header.createSpan({ text: t.aiThinkingFull });
       reasoning.createEl("p", {
         cls: "ghs-cv2-reasoning-body",
-        text: "Streaming response from the configured provider — usually takes 2–4 seconds.",
+        text: t.aiStreamingNote,
       });
       return;
     }
@@ -602,7 +605,7 @@ export class ConflictModal extends Modal {
     if (state.kind === "error") {
       header.addClass("error");
       setIcon(icon, "alert-circle");
-      header.createSpan({ text: "Provider error" });
+      header.createSpan({ text: t.providerError });
       reasoning.createEl("p", {
         cls: "ghs-cv2-reasoning-body",
         text: truncate(state.message, 280),
@@ -612,34 +615,36 @@ export class ConflictModal extends Modal {
 
     // idle / not configured
     setIcon(icon, "sparkles");
-    header.createSpan({ text: "AI Suggestion — not configured" });
+    header.createSpan({ text: t.aiNotConfiguredFull });
     reasoning.createEl("p", {
       cls: "ghs-cv2-reasoning-body",
-      text: !this.aiAvailable()
-        ? "Add a provider in Settings → AI to see automatic merge suggestions and reasoning here."
-        : "This file path is excluded from AI by your privacy settings. Pick Local / Remote or edit manually.",
+      text: !this.aiAvailable() ? t.reasonEmptyConfigure : t.reasonEmptyExcluded,
     });
   }
 
   private renderFooter(root: HTMLElement): void {
+    const t = L().conflict;
     const footer = root.createDiv("ghs-cv2-footer");
     footer.createDiv({
       cls: "ghs-cv2-progress",
-      text: `${this.resolvedHunks()}/${this.totalHunks()} hunks resolved · ${
-        this.files.filter((f, i) => this.fileStatus(f, i) !== "clean").length
-      } files remaining`,
+      text: tf(
+        t.hunksFooter,
+        this.resolvedHunks(),
+        this.totalHunks(),
+        this.files.filter((f, i) => this.fileStatus(f, i) !== "clean").length,
+      ),
     });
     footer.createDiv({ cls: "ghs-cv2-spacer" });
 
-    const abort = footer.createEl("button", { cls: "ghs-cv2-ghost-btn", text: "Abort merge" });
+    const abort = footer.createEl("button", { cls: "ghs-cv2-ghost-btn", text: t.abortMerge });
     abort.onclick = () => this.abort();
 
-    const cancel = footer.createEl("button", { text: "Cancel" });
+    const cancel = footer.createEl("button", { text: L().common.cancel });
     cancel.onclick = () => this.close();
 
     const next = footer.createEl("button", {
       cls: "mod-cta",
-      text: this.lastUnresolvedFile() ? "Save & finish" : "Save & next file",
+      text: this.lastUnresolvedFile() ? t.saveAndFinish : t.saveAndNext,
     });
     next.disabled = !this.fileResolved(this.file());
     next.onclick = () => this.saveAndAdvance();
@@ -652,6 +657,7 @@ export class ConflictModal extends Modal {
   // ── Summary state ─────────────────────────────────────────
 
   private renderSummary(): void {
+    const t = L().conflict;
     const root = this.contentEl.createDiv("ghs-cv2-root");
     this.renderHeader(root);
 
@@ -661,32 +667,32 @@ export class ConflictModal extends Modal {
     const summary = body.createDiv("ghs-cv2-summary");
     const iconWrap = summary.createDiv("ghs-cv2-summary-icon");
     setIcon(iconWrap, "check");
-    summary.createEl("h3", { text: "All conflicts resolved" });
+    summary.createEl("h3", { text: t.allConflictsTitle });
     summary.createEl("p", {
       cls: "ghs-cv2-summary-subtitle",
-      text: `${this.files.length} file(s) merged across ${this.totalHunks()} hunk(s). Click "Merge and push" to commit and sync.`,
+      text: tf(t.allConflictsDesc, this.files.length, this.totalHunks()),
     });
 
     const aiCount = this.countAIPicks();
     const stats = summary.createDiv("ghs-cv2-summary-stats");
-    this.statCard(stats, String(this.totalHunks()), "hunks resolved", "green");
-    this.statCard(stats, String(this.countByKind("local") + this.countByKind("remote")), "manual picks", "");
-    this.statCard(stats, String(aiCount), "AI-assisted", "accent");
-    this.statCard(stats, String(this.countByKind("edit") - aiCount), "edited", "");
+    this.statCard(stats, String(this.totalHunks()), t.hunksResolved, "green");
+    this.statCard(stats, String(this.countByKind("local") + this.countByKind("remote")), t.manualPicks, "");
+    this.statCard(stats, String(aiCount), t.aiAssisted, "accent");
+    this.statCard(stats, String(this.countByKind("edit") - aiCount), t.edited, "");
 
     const totalCost = this.totalAICost();
     if (totalCost > 0) {
       summary.createEl("p", {
         cls: "ghs-cv2-cost-note",
-        text: `AI cost this session: ~$${totalCost.toFixed(4)}`,
+        text: tf(t.aiCost, totalCost.toFixed(4)),
       });
     }
 
     const footer = root.createDiv("ghs-cv2-footer");
     footer.createDiv({ cls: "ghs-cv2-spacer" });
-    const closeBtn = footer.createEl("button", { text: "Close" });
+    const closeBtn = footer.createEl("button", { text: L().common.close });
     closeBtn.onclick = () => this.close();
-    const mergeBtn = footer.createEl("button", { cls: "mod-cta", text: "Merge and push" });
+    const mergeBtn = footer.createEl("button", { cls: "mod-cta", text: t.mergeAndPush });
     mergeBtn.onclick = () => this.finish(mergeBtn);
   }
 
@@ -794,49 +800,52 @@ export class ConflictModal extends Modal {
       await this.ops.stage(f.path);
       f.persisted = true;
     } catch (e) {
-      new Notice(`Failed to save ${f.path}: ${(e as Error).message}`);
+      new Notice(tf(L().conflict.noticeSaveFailed, f.path, (e as Error).message));
       throw e;
     }
   }
 
   private async finish(btn?: HTMLButtonElement): Promise<void> {
-    if (btn) { btn.disabled = true; btn.textContent = "Pushing…"; }
+    const t = L().conflict;
+    if (btn) { btn.disabled = true; btn.textContent = t.pushing; }
     try {
       for (const f of this.files) if (!f.persisted) await this.persistFile(f);
       await this.ops.commitMergedAndPush(`merge: resolve conflict in ${this.files.map(f => f.path).join(", ")}`);
-      new Notice(`Merged and pushed ${this.files.length} file(s).`);
+      new Notice(tf(t.mergedPushed, this.files.length));
       this.close();
       this.onResolved();
     } catch (e) {
-      new Notice(`Push failed: ${(e as Error).message}`);
-      if (btn) { btn.disabled = false; btn.textContent = "Merge and push"; }
+      new Notice(tf(t.pushFailed, (e as Error).message));
+      if (btn) { btn.disabled = false; btn.textContent = t.mergeAndPush; }
     }
   }
 
   private async abort(): Promise<void> {
     await this.ops.abortMerge();
-    new Notice("Merge aborted. Working tree restored.");
+    new Notice(L().conflict.mergeAborted);
     this.close();
     this.onResolved();
   }
 }
 
 function resolutionLabel(kind: HunkResolution["kind"]): string {
+  const t = L().conflict;
   switch (kind) {
-    case "local": return "Local";
-    case "remote": return "Remote";
-    case "both": return "Both";
-    case "edit": return "Edited";
-    case "skip": return "Skipped";
+    case "local": return t.resolutionLocal;
+    case "remote": return t.resolutionRemote;
+    case "both": return t.resolutionBoth;
+    case "edit": return t.resolutionEdited;
+    case "skip": return t.resolutionSkipped;
   }
 }
 
 function confidenceLabel(n: number): string {
-  if (n <= 1) return "very low";
-  if (n === 2) return "low";
-  if (n === 3) return "medium";
-  if (n === 4) return "high";
-  return "very high";
+  const t = L().conflict;
+  if (n <= 1) return t.confVeryLow;
+  if (n === 2) return t.confLow;
+  if (n === 3) return t.confMedium;
+  if (n === 4) return t.confHigh;
+  return t.confVeryHigh;
 }
 
 function truncate(s: string | undefined, n: number): string {

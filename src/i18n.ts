@@ -295,6 +295,47 @@ const en = {
     confHigh:           "high",
     confVeryHigh:       "very high",
     hunksFooter:        "{0}/{1} hunks resolved · {2} files remaining",
+
+    // Empty / no-markers state
+    noMarkersTitle:     "No conflict markers found in the listed files.",
+    noMarkersDesc:      "The merge was likely resolved or aborted elsewhere. Closing this dialog will clear the conflict card. If a merge is still pending in git, use Abort merge to clean it up.",
+    forceCleanResync:   "Force clean & resync",
+
+    // Notices
+    noticeAborted:           "Aborted any pending merge.",
+    noticeAbortFailed:       "Couldn't abort: {0}",
+    noticeCleanedResyncing:  "Cleaned merge state — resyncing…",
+    noticeForceCleanFailed:  "Force clean failed: {0}",
+    noticeSaveFailed:        "Failed to save {0}: {1}",
+    noticeLoadFailed:        "Couldn't load {0}: {1}",
+
+    // Header / labels
+    repoPrefix:         "Repo {0}",
+    conflictsPrefix:    "Conflicts /",
+    unresolvedTag:      "Unresolved",
+    skippedTag:         "○ skipped",
+
+    // AI button + tooltips
+    takeAi:             "Take AI",
+    tipAiThinking:      "AI is generating a suggestion…",
+    tipAiFailed:        "AI failed — retry or resolve manually",
+    tipAiConfigure:     "Configure an AI provider in Settings → AI",
+
+    // AI empty-state copy
+    aiEmptyConfigure:   "Configure a provider in Settings → AI to enable automatic merge suggestions.",
+    aiEmptyExcluded:    "AI is excluded for this file by your privacy settings.",
+    reasonEmptyConfigure: "Add a provider in Settings → AI to see automatic merge suggestions and reasoning here.",
+    reasonEmptyExcluded:  "This file path is excluded from AI by your privacy settings. Pick Local / Remote or edit manually.",
+
+    // Edit mode
+    saveEdit:           "Save edit",
+    kbdSave:            " save · ",
+    kbdCancel:          " cancel",
+
+    // Cost / model info
+    freeTier:           "free tier",
+    modelInfo:          "Model: {0}",
+    tokensInOut:        "{0} in / {1} out",
   },
 
   wizard: {
@@ -659,7 +700,48 @@ const zh: typeof en = {
     confMedium:         "中",
     confHigh:           "高",
     confVeryHigh:       "极高",
-    hunksFooter:        "{0}/{1} 个差异块已解决 · 剩余 {1} 个文件",
+    hunksFooter:        "{0}/{1} 个差异块已解决 · 剩余 {2} 个文件",
+
+    // Empty / no-markers state
+    noMarkersTitle:     "未在所列文件中找到冲突标记。",
+    noMarkersDesc:      "合并很可能已在别处解决或中止。关闭此对话框将清除冲突卡片。如果 git 中仍有未完成的合并，请用「中止合并」清理。",
+    forceCleanResync:   "强制清理并重新同步",
+
+    // Notices
+    noticeAborted:           "已中止任何未完成的合并。",
+    noticeAbortFailed:       "无法中止：{0}",
+    noticeCleanedResyncing:  "已清理合并状态 — 正在重新同步…",
+    noticeForceCleanFailed:  "强制清理失败：{0}",
+    noticeSaveFailed:        "保存 {0} 失败：{1}",
+    noticeLoadFailed:        "加载 {0} 失败：{1}",
+
+    // Header / labels
+    repoPrefix:         "仓库 {0}",
+    conflictsPrefix:    "冲突 /",
+    unresolvedTag:      "未解决",
+    skippedTag:         "○ 已跳过",
+
+    // AI button + tooltips
+    takeAi:             "采用 AI",
+    tipAiThinking:      "AI 正在生成建议…",
+    tipAiFailed:        "AI 失败——重试或手动解决",
+    tipAiConfigure:     "请在 设置 → AI 中配置 AI 提供商",
+
+    // AI empty-state copy
+    aiEmptyConfigure:   "请在 设置 → AI 中配置提供商以启用自动合并建议。",
+    aiEmptyExcluded:    "此文件被你的隐私设置排除在 AI 之外。",
+    reasonEmptyConfigure: "在 设置 → AI 中添加提供商即可在此查看自动合并建议及推理。",
+    reasonEmptyExcluded:  "此文件路径被你的隐私设置排除在 AI 之外。请选择本地 / 远程或手动编辑。",
+
+    // Edit mode
+    saveEdit:           "保存编辑",
+    kbdSave:            " 保存 · ",
+    kbdCancel:          " 取消",
+
+    // Cost / model info
+    freeTier:           "免费额度",
+    modelInfo:          "模型：{0}",
+    tokensInOut:        "输入 {0} / 输出 {1}",
   },
 
   wizard: {
@@ -1024,7 +1106,48 @@ const zhTw: typeof en = {
     confMedium:         "中",
     confHigh:           "高",
     confVeryHigh:       "極高",
-    hunksFooter:        "{0}/{1} 個差異區塊已解決 · 剩餘 {1} 個檔案",
+    hunksFooter:        "{0}/{1} 個差異區塊已解決 · 剩餘 {2} 個檔案",
+
+    // Empty / no-markers state
+    noMarkersTitle:     "未在列出的檔案中找到衝突標記。",
+    noMarkersDesc:      "合併很可能已在其他地方解決或中止。關閉此對話框將清除衝突卡片。若 git 中仍有未完成的合併，請用「中止合併」清理。",
+    forceCleanResync:   "強制清理並重新同步",
+
+    // Notices
+    noticeAborted:           "已中止任何未完成的合併。",
+    noticeAbortFailed:       "無法中止：{0}",
+    noticeCleanedResyncing:  "已清理合併狀態 — 正在重新同步…",
+    noticeForceCleanFailed:  "強制清理失敗：{0}",
+    noticeSaveFailed:        "儲存 {0} 失敗：{1}",
+    noticeLoadFailed:        "載入 {0} 失敗：{1}",
+
+    // Header / labels
+    repoPrefix:         "倉庫 {0}",
+    conflictsPrefix:    "衝突 /",
+    unresolvedTag:      "未解決",
+    skippedTag:         "○ 已跳過",
+
+    // AI button + tooltips
+    takeAi:             "採用 AI",
+    tipAiThinking:      "AI 正在產生建議…",
+    tipAiFailed:        "AI 失敗——重試或手動解決",
+    tipAiConfigure:     "請在 設定 → AI 中設定 AI 提供者",
+
+    // AI empty-state copy
+    aiEmptyConfigure:   "請在 設定 → AI 中設定提供者以啟用自動合併建議。",
+    aiEmptyExcluded:    "此檔案被你的隱私設定排除在 AI 之外。",
+    reasonEmptyConfigure: "在 設定 → AI 中新增提供者即可在此查看自動合併建議及推理。",
+    reasonEmptyExcluded:  "此檔案路徑被你的隱私設定排除在 AI 之外。請選擇本地 / 遠端或手動編輯。",
+
+    // Edit mode
+    saveEdit:           "儲存編輯",
+    kbdSave:            " 儲存 · ",
+    kbdCancel:          " 取消",
+
+    // Cost / model info
+    freeTier:           "免費額度",
+    modelInfo:          "模型：{0}",
+    tokensInOut:        "輸入 {0} / 輸出 {1}",
   },
 
   wizard: {
@@ -1390,6 +1513,47 @@ const ja: typeof en = {
     confHigh:           "高い",
     confVeryHigh:       "非常に高い",
     hunksFooter:        "{0}/{1} ハンク解決済み · 残り {2} ファイル",
+
+    // Empty / no-markers state
+    noMarkersTitle:     "リストされたファイルにコンフリクトマーカーが見つかりません。",
+    noMarkersDesc:      "マージは別の場所で解決または中止された可能性があります。このダイアログを閉じるとコンフリクトカードがクリアされます。git にマージが保留中の場合は「マージを中止」でクリーンアップしてください。",
+    forceCleanResync:   "強制クリーン & 再同期",
+
+    // Notices
+    noticeAborted:           "保留中のマージを中止しました。",
+    noticeAbortFailed:       "中止できませんでした: {0}",
+    noticeCleanedResyncing:  "マージ状態をクリアしました — 再同期中…",
+    noticeForceCleanFailed:  "強制クリーンに失敗: {0}",
+    noticeSaveFailed:        "{0} を保存できませんでした: {1}",
+    noticeLoadFailed:        "{0} を読み込めませんでした: {1}",
+
+    // Header / labels
+    repoPrefix:         "リポジトリ {0}",
+    conflictsPrefix:    "コンフリクト /",
+    unresolvedTag:      "未解決",
+    skippedTag:         "○ スキップ",
+
+    // AI button + tooltips
+    takeAi:             "AI を採用",
+    tipAiThinking:      "AI が提案を生成中…",
+    tipAiFailed:        "AI が失敗 — 再試行または手動で解決",
+    tipAiConfigure:     "設定 → AI で AI プロバイダを設定してください",
+
+    // AI empty-state copy
+    aiEmptyConfigure:   "設定 → AI でプロバイダを設定すると、自動マージ提案が有効になります。",
+    aiEmptyExcluded:    "このファイルはプライバシー設定により AI から除外されています。",
+    reasonEmptyConfigure: "設定 → AI でプロバイダを追加すると、自動マージ提案と理由をここに表示できます。",
+    reasonEmptyExcluded:  "このファイルパスはプライバシー設定により AI から除外されています。ローカル／リモートを選ぶか、手動で編集してください。",
+
+    // Edit mode
+    saveEdit:           "編集を保存",
+    kbdSave:            " 保存 · ",
+    kbdCancel:          " キャンセル",
+
+    // Cost / model info
+    freeTier:           "無料枠",
+    modelInfo:          "モデル: {0}",
+    tokensInOut:        "入力 {0} / 出力 {1}",
   },
 
   wizard: {
