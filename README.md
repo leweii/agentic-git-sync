@@ -1,79 +1,56 @@
 # Agentic Git Sync
 
-**Agentic two-way sync between your Obsidian vault and GitHub — including nested folders as separate repos — without ever touching a terminal.**
+[English](./README.md) | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | [日本語](./README.ja.md)
 
-Most git-based Obsidian sync plugins assume you know git. This one doesn't. Four things make it different:
+A GitHub two-way sync plugin for Obsidian users who don't know git. Three things make it different.
 
-### 🤖 Agentic git error recovery
+![Agentic Git Sync dashboard inside Obsidian](./docs/screenshots/dashboard.png)
 
-Git can fail in dozens of ways: stale lock files, mid-merge state, non-fast-forward push, detached HEAD, oversized files, missing submodules. Other plugins surface raw `fatal:` errors that mean nothing to non-technical users. Agentic Git Sync routes every failure through an AI agent that classifies the error, picks a recovery tool from a 16-tool catalog, executes it silently, and retries — all before you see anything went wrong. A deterministic rule-based fallback covers users who haven't configured an AI key.
+## Core features
 
-### 🧩 Real submodule support, not just one repo
+### An AI agent handles the git internals
 
-Map any folder in your vault to its own GitHub repo. Keep personal notes private, sync a `Projects/` folder with your team, push a `Blog/` folder to a public repo — all from the same vault, each with independent sync settings. Adding a submodule is a single dialog: paste a URL, type a folder name, done.
+Hand the messy parts of git off to an AI.
 
-### ✨ AI-resolved merge conflicts
+![File history with semantic commit messages and diff](./docs/screenshots/file-history.png)
 
-Side-by-side three-pane resolver for conflicts the AI couldn't auto-resolve, with semantic merging that preserves intent from both sides. The AI explains its reasoning, marks the lines it had to choose between, and you accept or override.
+- **AI conflict resolution** — auto-merges diverged branches and only opens a visual resolver when it can't decide.
+- **Git error diagnosis** — non-fast-forward push? need to merge before push? you don't need to know any of it; the agent navigates it.
+- **AI-drafted commit messages** — DeepSeek or Gemini reads the diff and produces a semantic message you can edit before committing.
+- **Empty repos auto-initialize** — paste a URL and the plugin silently does the initial commit and first push.
 
-### 👶 Designed for users who don't know git
+### Fits both personal sync and team collaboration
 
-- **Setup wizard** walks you through token → identity → first repo connection
-- **`?` icon next to the token field** opens GitHub's PAT creation page directly — no need to know what a "personal access token" is
-- **Empty repos are auto-initialized.** Create a new repo on github.com, paste the URL, click Add. The plugin silently seeds it with a README so git is happy. No "branch yet to be born" errors.
-- **Test connection** diagnoses three layers (token validity, repo access, actual git auth path) and tells you exactly which step is failing, in plain language. No more `403` mysteries.
+Private notes stay private while team work happens alongside — independent, non-interfering.
 
-## Installation
+![Add submodule dialog with Team mode](./docs/screenshots/add-submodule.png)
 
-### Community plugins
+- Personal knowledge stays private.
+- Team-shared knowledge lives in submodules.
+- A friendly conflict-management UI.
+- A simple personal-branch / team-main-branch model.
 
-1. Open **Settings → Community plugins**
-2. Click **Browse**, search for **Agentic Git Sync**
-3. Click **Install**, then **Enable**
+### Invisible two-way sync
 
-### Manual install
+A background scheduler pulls and pushes on a timer while you write. Tokens and machine-local state stay in `.obsidian/` (never committed); remote URLs and the submodule list live in `.github-sync.json` and travel with the repo, so a fresh clone on another machine restores your config automatically.
 
-1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/leweii/agentic-git-sync/releases/latest)
-2. Copy them into `<your-vault>/.obsidian/plugins/agentic-git-sync/`
-3. Restart Obsidian, then enable **Agentic Git Sync** under Settings → Community plugins
+## Install
 
-## Getting started
+**Community plugins:** Settings → Community plugins → Browse → search *Agentic Git Sync* → Install → Enable.
 
-The setup wizard appears from Settings → Agentic Git Sync → Run setup wizard. Three short steps:
+**Manual:** download `main.js`, `manifest.json`, `styles.css` from the [latest release](https://github.com/leweii/agentic-git-sync/releases/latest), drop them into `<vault>/.obsidian/plugins/agentic-git-sync/`, restart Obsidian, and enable.
 
-1. **Paste a GitHub Personal Access Token.** Click the **?** icon next to the input to open the GitHub token page. Either format works:
-   - Classic (`ghp_…`) — needs the `repo` scope
-   - Fine-grained (`github_pat_…`) — give it **Contents: read & write** on the repos you'll sync
-2. **Connect your main vault to a GitHub repo.** Paste the HTTPS URL. The plugin handles the initial commit, push, and (if the repo is empty) seeds it so the first sync works.
-3. **(Optional) Add submodules** from the dashboard. One submodule per folder you want in its own repo.
+## Get started
 
-## How your data is stored
+Settings → Agentic Git Sync → **Run setup wizard**:
 
-| File | Where | Contains | Travels with the repo? |
-|---|---|---|---|
-| `data.json` | `<vault>/.obsidian/plugins/agentic-git-sync/` | Your tokens, sync history, per-machine state | ❌ Local only |
-| `.github-sync.json` | `<vault>/` | Remote URLs, branches, AI model choice, submodule list | ✅ Committed (so a fresh clone on a new machine picks up your config automatically) |
+1. Paste a GitHub Personal Access Token (the `?` icon opens GitHub's token page). Classic needs `repo`; fine-grained needs **Contents: read & write**.
+2. Paste the HTTPS URL of the repo for your main vault. The plugin handles the initial commit and first push.
+3. (Optional) Add per-folder submodules from the dashboard.
 
-**Secrets never leave your device.** The plugin's own `.gitignore` excludes `.obsidian/`, and `.github-sync.json`'s schema has no token fields at all — there's no path by which the plugin can leak credentials into a commit.
+## Data security
 
-## Security & permissions
-
-The plugin is `isDesktopOnly: true` and uses a few APIs that the Obsidian community-plugin scanner flags. Each is justified by what a git plugin fundamentally has to do; what each one is and isn't, in plain terms:
-
-| API | What we do with it | What we don't do |
-|---|---|---|
-| **Node `fs` (read/write outside vault API)** | Read and write files inside `<vault>/.git/` (lock files like `index.lock` / `MERGE_HEAD`, `.gitmodules`, the submodule's `.git` gitfile) and toplevel git-managed files (`.gitignore`). Obsidian's `Vault` API doesn't expose dotfiles or `.git/`, so we can't reach them through it. | Read or write anywhere outside the user's vault root. Every path passed to `fs` is constructed from the vault path and a git-known sub-path. Access is gated by `Platform.isDesktop`. |
-| **`child_process` (shell execution)** | Not used directly. Pulled in transitively by [`simple-git`](https://github.com/steveukx/git-js), which invokes the system `git` binary to run actual git operations (pull, push, commit, merge). This is the only way to use git from a Node plugin. | Spawn anything besides git, or pass user-controlled strings as commands. `simple-git` passes arguments as a fixed argv array, not through a shell. |
-| **Clipboard** | One write of the plugin's own error string when you click the "Copy" button next to a failed sync, so you can paste it into an issue or chat. *(Removed in v1.1.1+: replaced with an inline selectable error text element so no clipboard write happens at all.)* | Read the clipboard. Touch any vault content. |
-| **Network** | HTTPS requests to `github.com` / `api.github.com` to do git fetch/push, check repo access, and (if you've configured one) the AI provider you chose (DeepSeek or Gemini) for conflict resolution. | Send anything anywhere else. AI requests only fire when smart-sync is on AND a key is configured; you can disable file-path or surrounding-context sharing in Settings → AI. |
-
-The token you paste in Settings is stored in `<vault>/.obsidian/plugins/agentic-git-sync/data.json` — local only, never written into any committed file. The plugin's `.github-sync.json` (the shared, committed config) has no token field at all.
-
-## Troubleshooting
-
-**`Permission denied` or `403` on push.** Open Settings → Agentic Git Sync → **Test connection**. The third row (`git auth`) exercises the same credential path your sync uses. If that row fails while the API rows pass, your local git is using stale credentials (most commonly the macOS Keychain) — erase the cached entry or rotate the token.
-
-**Token sticks around after uninstall.** Obsidian preserves plugin data across reinstalls by design. To fully wipe credentials, delete `<vault>/.obsidian/plugins/agentic-git-sync/data.json`.
+**Secrets never leave your device.** The token lives in `<vault>/.obsidian/plugins/agentic-git-sync/data.json` — local only. The committed `.github-sync.json` has no token field by schema, so credentials cannot leak into a commit.
 
 ## License
 
