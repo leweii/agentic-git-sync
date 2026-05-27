@@ -12,6 +12,7 @@ import { SyncDashboard, DASHBOARD_VIEW_TYPE } from "./ui/SyncDashboard";
 import { LocalChangesModal } from "./ui/LocalChangesModal";
 import { FileHistoryModal } from "./ui/FileHistoryModal";
 import { SwitchBranchModal } from "./ui/SwitchBranchModal";
+import { GitNotInstalledModal } from "./ui/GitNotInstalledModal";
 import { L, tf, setLang } from "./i18n";
 import { friendlyError } from "./errors";
 import { VAULT_REPO_ID } from "./types";
@@ -52,6 +53,7 @@ export default class GitHubSyncPlugin extends Plugin {
    * history rather than nagging every 30 minutes.
    */
   private userSyncIntent = false;
+  private gitNotInstalledModalShown = false;
 
   /**
    * Resolve the live dashboard view from the workspace rather than holding
@@ -110,6 +112,9 @@ export default class GitHubSyncPlugin extends Plugin {
     this.scheduler.onComplete((id, result) => {
       this.recordHistoryFromResult(id, result);
       void this.refreshStatusBarPending();
+      if (result.ok === false) {
+        this.maybeShowGitNotInstalledModal(result.error.message);
+      }
       if (
         this.userSyncIntent &&
         id === VAULT_REPO_ID &&
@@ -366,6 +371,13 @@ export default class GitHubSyncPlugin extends Plugin {
    * a different branch — we'll create it on the remote from the default
    * branch and retry the sync. Returns true when the modal was opened.
    */
+  private maybeShowGitNotInstalledModal(message: string): void {
+    if (this.gitNotInstalledModalShown) return;
+    if (!/spawn git ENOENT|ENOENT.*git|'git' is not recognized|git: command not found/i.test(message)) return;
+    this.gitNotInstalledModalShown = true;
+    new GitNotInstalledModal(this.app).open();
+  }
+
   maybeOfferBranchSwitch(errorMessage: string, branch: string): boolean {
     if (!isPushPermissionError(errorMessage)) return false;
     if (!this.settings.mainRepoUrl) return false;
@@ -578,6 +590,9 @@ export default class GitHubSyncPlugin extends Plugin {
     });
     this.scheduler.onComplete((id, result) => {
       this.recordHistoryFromResult(id, result);
+      if (result.ok === false) {
+        this.maybeShowGitNotInstalledModal(result.error.message);
+      }
       if (
         this.userSyncIntent &&
         id === VAULT_REPO_ID &&

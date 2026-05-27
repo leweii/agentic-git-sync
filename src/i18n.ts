@@ -377,6 +377,10 @@ const en = {
     errorLoading: "Failed to load: {0}",
     copyHash:     "Copy hash",
   },
+
+  errors: {
+    gitNotInstalled: "Git is not installed or not found in PATH. Install Git and restart Obsidian.",
+  },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -737,6 +741,10 @@ const zh: typeof en = {
     empty:        "该文件暂无提交记录。",
     errorLoading: "加载失败：{0}",
     copyHash:     "复制哈希",
+  },
+
+  errors: {
+    gitNotInstalled: "Git 未安装或未加入 PATH。请安装 Git 后重启 Obsidian。",
   },
 };
 
@@ -1099,6 +1107,10 @@ const zhTw: typeof en = {
     errorLoading: "載入失敗：{0}",
     copyHash:     "複製雜湊值",
   },
+
+  errors: {
+    gitNotInstalled: "Git 未安裝或未加入 PATH。請安裝 Git 後重啟 Obsidian。",
+  },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1459,5 +1471,9 @@ const ja: typeof en = {
     empty:        "このファイルのコミット履歴はありません。",
     errorLoading: "読み込み失敗: {0}",
     copyHash:     "ハッシュをコピー",
+  },
+
+  errors: {
+    gitNotInstalled: "Git がインストールされていないか PATH にありません。Git をインストールして Obsidian を再起動してください。",
   },
 };

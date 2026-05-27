@@ -1,7 +1,13 @@
+import { L } from "./i18n";
+
 // Translate raw git/HTTP errors into something a user can act on.
 export function friendlyError(raw: string): string {
   if (!raw) return "Unknown error";
   const m = raw.toLowerCase();
+
+  if (/spawn git ENOENT|ENOENT.*git|'git' is not recognized|git: command not found/i.test(raw)) {
+    return L().errors.gitNotInstalled;
+  }
 
   if (m.includes("authentication failed") || m.includes("invalid username or password")) {
     return "Authentication failed — check your Personal Access Token in Settings.";
