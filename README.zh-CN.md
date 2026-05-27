@@ -12,9 +12,9 @@
 
 把繁琐的 Git 操作全权交给 AI。
 
-![语义化 commit message 与 diff 的文件历史](./docs/screenshots/file-history.png)
+![AI 辅助的三栏冲突解决界面，附 AI 推理](./docs/screenshots/conflict-resolver.png)
 
-- **AI 冲突解决** — 本地与远端分叉时自动尝试合并，仅在无法判定时弹出可视化对话框。
+- **AI 冲突解决** — 本地与远端分叉时自动尝试合并，仅在无法判定时弹出可视化对话框。打开后是 Local / Remote / AI Suggestion 三栏视图，附 AI 置信度评级与模型选择该侧的推理依据。
 - **Git 操作诊断** — 不是 fast forward？需要 git merge before push？这些 git 使用规范你都不需要了解，Agentic 驾驭一切。
 - **AI 起草 commit message** — DeepSeek 或 Gemini 读 diff 后生成语义化提交信息，可在提交前编辑。
 - **空 repo 自动初始化** — 粘 URL 即可，插件静默处理初始 commit 与首推。
@@ -51,6 +51,12 @@
 ## 数据安全
 
 **密钥永不离开设备。** Token 存在 `<vault>/.obsidian/plugins/agentic-git-sync/data.json`，仅本机持有。提交到仓库的 `.github-sync.json` 在 schema 上就没有 token 字段，凭据无法被写入 commit。
+
+## Git 历史
+
+不离开 Obsidian 即可浏览任意文件的提交历史。点击某次提交（或 shift-点击选范围）查看内联 diff；commit message 就是同步时由 AI 生成的语义化信息。
+
+![文件历史弹窗，含提交列表与内联 diff](./docs/screenshots/file-history.png)
 
 ## 许可证
 

@@ -12,9 +12,9 @@ A GitHub two-way sync plugin for Obsidian users who don't know git. Three things
 
 Hand the messy parts of git off to an AI.
 
-![File history with semantic commit messages and diff](./docs/screenshots/file-history.png)
+![AI-assisted three-pane conflict resolver with reasoning](./docs/screenshots/conflict-resolver.png)
 
-- **AI conflict resolution** — auto-merges diverged branches and only opens a visual resolver when it can't decide.
+- **AI conflict resolution** — auto-merges diverged branches and only opens a visual resolver when it can't decide. When it does open, you get a three-pane Local / Remote / AI Suggestion view, an AI confidence rating, and the model's reasoning for the picked side.
 - **Git error diagnosis** — non-fast-forward push? need to merge before push? you don't need to know any of it; the agent navigates it.
 - **AI-drafted commit messages** — DeepSeek or Gemini reads the diff and produces a semantic message you can edit before committing.
 - **Empty repos auto-initialize** — paste a URL and the plugin silently does the initial commit and first push.
@@ -51,6 +51,12 @@ Settings → Agentic Git Sync → **Run setup wizard**:
 ## Data security
 
 **Secrets never leave your device.** The token lives in `<vault>/.obsidian/plugins/agentic-git-sync/data.json` — local only. The committed `.github-sync.json` has no token field by schema, so credentials cannot leak into a commit.
+
+## Git history
+
+Browse the commit history of any file without leaving Obsidian. Click a commit (or shift-click a range) to see the diff inline; commit messages are the semantic ones the AI drafted when the change was synced.
+
+![File history modal with commit list and inline diff](./docs/screenshots/file-history.png)
 
 ## License
 
