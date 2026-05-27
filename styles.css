@@ -713,6 +713,12 @@
   margin-bottom: 14px;
 }
 
+.ghs-dashboard-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .ghs-dashboard-header h4 {
   margin: 0;
   font-size: 0.85em;
