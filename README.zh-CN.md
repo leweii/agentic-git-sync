@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./docs/logo/logo.png" alt="Agentic Git Sync" width="160">
+</p>
+
 # Agentic Git Sync
 
 [English](./README.md) | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | [日本語](./README.ja.md)

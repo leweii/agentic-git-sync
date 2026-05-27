@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Agentic Git Sync icon">
+  <!-- Hex gem outline -->
+  <path d="M 50 8 L 88 30 L 88 70 L 50 92 L 12 70 L 12 30 Z"/>
+  <!-- Kintsugi seam -->
+  <path d="M 36 16 L 48 32 L 40 42 L 56 54 L 44 64 L 58 80 L 52 88" stroke-width="4"/>
+</svg>
