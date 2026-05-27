@@ -111,7 +111,7 @@ export class SubmoduleManager {
     //   2. git rm (remove from index + .gitmodules)
     //   3. fs.rm .git/modules/<path>   (NOT `git rm` — that path isn't tracked)
     await this.git.raw(["submodule", "deinit", "-f", "--", localPath]).catch(() => {});
-    await this.git.raw(["rm", "-f", "--", localPath]).catch(() => {});
+    await this.git.raw(["rm", "-r", "-f", "--", localPath]).catch(() => {});
     try {
       fs.rmSync(`${this.vaultPath}/.git/modules/${localPath}`, {
         recursive: true,
@@ -448,6 +448,15 @@ export class SubmoduleManager {
       await this.ensureInitialized([config], (msg) =>
         onProgress?.({ phase: "pulling", message: msg })
       );
+      // If init failed (e.g. remote not found), the directory will have been
+      // cleaned up by git. Surface a clear error rather than letting simpleGit
+      // throw "Cannot use simple-git on a directory that does not exist".
+      if (!fs.existsSync(`${subDir}/.git`)) {
+        throw new Error(
+          `Submodule "${config.localPath}" could not be initialised. ` +
+          `Check that the remote URL is accessible: ${config.remoteUrl}`
+        );
+      }
     }
     const count = await this.getSubGM(config).sync({
       branch: config.branch,
