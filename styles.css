@@ -1348,6 +1348,52 @@
   font-size: 0.85em;
 }
 
+/* Branch label row: label + team-mode chip side by side */
+.ghs-field-label-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.ghs-field-label-row label {
+  display: inline;
+  margin: 0;
+}
+
+/* Team-mode toggle chip */
+.ghs-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 0.78em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  line-height: 1.6;
+}
+.ghs-chip:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.ghs-chip.active {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+.ghs-chip .ghs-chip-icon {
+  display: flex;
+  align-items: center;
+}
+.ghs-chip .ghs-chip-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
 /* ─── Conflict Modal v2 — three-pane diff ───────────────────────
    See design/mockups/conflict-resolution.html for the spec.
    All classes prefixed ghs-cv2- to avoid collision with the

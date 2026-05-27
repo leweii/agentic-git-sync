@@ -443,6 +443,12 @@ export class SubmoduleManager {
   // ── Sync ─────────────────────────────────────────────────────────
 
   async syncOne(config: SubmoduleConfig, onProgress?: ProgressFn): Promise<number> {
+    const subDir = `${this.vaultPath}/${config.localPath}`;
+    if (!fs.existsSync(`${subDir}/.git`)) {
+      await this.ensureInitialized([config], (msg) =>
+        onProgress?.({ phase: "pulling", message: msg })
+      );
+    }
     const count = await this.getSubGM(config).sync({
       branch: config.branch,
       upstreamBranch: config.upstreamBranch,

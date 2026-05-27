@@ -9,6 +9,7 @@ export class AddSubmoduleModal extends Modal {
   private remoteUrl = "";
   private branch = "main";
   private upstreamBranch = "";
+  private isTeamMode: boolean;
   private remoteStatus: "idle" | "loading" | "valid" | "invalid" = "idle";
   private remoteMsg = "";
   private remoteIsEmpty = false;
@@ -18,6 +19,7 @@ export class AddSubmoduleModal extends Modal {
 
   constructor(app: App, private plugin: GitHubSyncPlugin) {
     super(app);
+    this.isTeamMode = this.plugin.settings.usageMode === "team";
   }
 
   onOpen(): void {
@@ -72,21 +74,36 @@ export class AddSubmoduleModal extends Modal {
 
     // ── Branch ─────────────────────────────────────────────────
     const branchWrap = contentEl.createDiv("ghs-wizard-field");
-    branchWrap.createEl("label", { text: t.addSubBranch });
+    const branchLabelRow = branchWrap.createDiv("ghs-field-label-row");
+    branchLabelRow.createEl("label", { text: t.addSubBranch });
+    const teamBtn = branchLabelRow.createEl("button", {
+      cls: `ghs-chip${this.isTeamMode ? " active" : ""}`,
+      text: t.addSubTeamMode,
+    });
+    setIcon(teamBtn.createSpan({ cls: "ghs-chip-icon" }), "users");
     // eslint-disable-next-line obsidianmd/ui/sentence-case -- "main" is a branch name, not UI prose
     const branchInput = branchWrap.createEl("input", { attr: { placeholder: "main" } });
     branchInput.value = "main";
     branchInput.oninput = () => (this.branch = branchInput.value.trim() || "main");
 
-    // Upstream branch — team workflow only. Hidden in personal mode.
-    if (this.plugin.settings.usageMode === "team") {
-      const upWrap = contentEl.createDiv("ghs-wizard-field");
-      upWrap.createEl("label", { text: t.addSubUpstream });
-      const upHint = upWrap.createDiv("ghs-field-hint");
-      upHint.setText(t.addSubUpstreamHint);
-      const upInput = upWrap.createEl("input", { attr: { placeholder: t.addSubUpstreamPh } });
-      upInput.oninput = () => (this.upstreamBranch = upInput.value.trim());
-    }
+    // Upstream branch — always in DOM, shown only in team mode.
+    const upWrap = contentEl.createDiv("ghs-wizard-field");
+    if (!this.isTeamMode) upWrap.addClass("ghs-hidden");
+    upWrap.createEl("label", { text: t.addSubUpstream });
+    const upHint = upWrap.createDiv("ghs-field-hint");
+    upHint.setText(t.addSubUpstreamHint);
+    const upInput = upWrap.createEl("input", { attr: { placeholder: t.addSubUpstreamPh } });
+    upInput.oninput = () => (this.upstreamBranch = upInput.value.trim());
+
+    teamBtn.onclick = () => {
+      this.isTeamMode = !this.isTeamMode;
+      teamBtn.toggleClass("active", this.isTeamMode);
+      upWrap.toggleClass("ghs-hidden", !this.isTeamMode);
+      if (!this.isTeamMode) {
+        this.upstreamBranch = "";
+        upInput.value = "";
+      }
+    };
 
     // ── Footer ─────────────────────────────────────────────────
     const footer = contentEl.createDiv("ghs-wizard-footer");

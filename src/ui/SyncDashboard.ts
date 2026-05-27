@@ -133,6 +133,10 @@ export class SyncDashboard extends ItemView {
     const header = root.createDiv("ghs-dashboard-header");
     // eslint-disable-next-line obsidianmd/ui/sentence-case -- "Agentic Git Sync" is the proper product name
     header.createEl("h4", { text: "Agentic Git Sync" });
+    const addSubBtn = header.createEl("button", { cls: "ghs-icon-btn", attr: { title: L().settings.addSubTitle } });
+    setIcon(addSubBtn, "plus");
+    addSubBtn.onclick = () => new AddSubmoduleModal(this.app, this.plugin).open();
+
     const syncAllBtn = header.createEl("button", { cls: "ghs-icon-btn", attr: { title: "Sync all now" } });
     setIcon(syncAllBtn, "refresh-cw");
     syncAllBtn.onclick = () => this.syncAll();
