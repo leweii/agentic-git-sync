@@ -1,4 +1,4 @@
-import { Plugin, Notice, FileSystemAdapter, setIcon, TFolder, addIcon } from "obsidian";
+import { Plugin, Notice, FileSystemAdapter, setIcon, TFolder } from "obsidian";
 import type { TAbstractFile } from "obsidian";
 import { fs, path } from "./node-builtins";
 import { EventLog } from "./observability/EventLog";
@@ -141,16 +141,8 @@ export default class GitHubSyncPlugin extends Plugin {
 
     this.registerView(DASHBOARD_VIEW_TYPE, (leaf) => new SyncDashboard(leaf, this));
 
-    addIcon(
-      "agentic-git-sync",
-      `<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M 50 8 L 88 30 L 88 70 L 50 92 L 12 70 L 12 30 Z" stroke-width="5"/>
-        <path d="M 36 16 L 48 32 L 40 42 L 56 54 L 44 64 L 58 80 L 52 88" stroke-width="4"/>
-      </g>`,
-    );
-
     // eslint-disable-next-line obsidianmd/ui/sentence-case -- "Agentic Git Sync" is the proper product name
-    this.addRibbonIcon("agentic-git-sync", "Agentic Git Sync", () => this.activateDashboard());
+    this.addRibbonIcon("github", "Agentic Git Sync", () => this.activateDashboard());
 
     this.addCommand({
       id: "sync-now",
