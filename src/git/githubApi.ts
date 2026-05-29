@@ -328,6 +328,162 @@ export async function ensureRemoteBranch(
   return { created: true, defaultBranch };
 }
 
+export interface CreatePullRequestParams {
+  remoteUrl: string;
+  token: string;
+  head: string;
+  base: string;
+  title: string;
+  body?: string;
+}
+
+export interface CreatePullRequestResult {
+  ok: boolean;
+  url?: string;
+  number?: number;
+  reason?: string;
+  /** When ok=false because a PR already exists, this points at it. */
+  existingUrl?: string;
+}
+
+interface GitHubPullCreated { html_url?: string; number?: number }
+interface GitHubValidationError {
+  message?: string;
+  errors?: { message?: string; resource?: string; field?: string; code?: string }[];
+}
+interface GitHubPullSummary { html_url?: string; number?: number; head?: { ref?: string }; base?: { ref?: string } }
+
+/**
+ * Open a pull request from `head` → `base` on the given GitHub repo.
+ *
+ * Returns a structured result; never throws on HTTP errors. The most
+ * common failure paths get friendly messages:
+ *
+ *   - 422 "No commits between" → nothing to PR; tell the user to sync first
+ *   - 422 "A pull request already exists" → re-query open PRs and surface
+ *     the existing URL in `existingUrl`
+ *   - 401/403/404 → reuse the token-diagnostic vocabulary from the rest
+ *     of this file (missing scope / SSO / fine-grained allowlist)
+ *
+ * Required token permissions:
+ *   - Classic PAT: `repo` scope (covers PR creation)
+ *   - Fine-grained PAT: "Pull requests: Read and write" on the target repo
+ */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-member-access */
+export async function createPullRequest(
+  p: CreatePullRequestParams,
+): Promise<CreatePullRequestResult> {
+  const parsed = parseOwnerRepo(p.remoteUrl);
+  if (!parsed) {
+    return { ok: false, reason: "Not a github.com URL — PR creation is only supported on github.com." };
+  }
+  if (!p.token) {
+    return { ok: false, reason: "No GitHub token configured. Set a Personal Access Token in Settings first." };
+  }
+  if (!p.head || !p.base) {
+    return { ok: false, reason: "Both head and base branch must be set." };
+  }
+  if (p.head === p.base) {
+    return { ok: false, reason: "Head and base are the same branch — nothing to PR." };
+  }
+  if (!p.title.trim()) {
+    return { ok: false, reason: "PR title is required." };
+  }
+
+  const { owner, repo } = parsed;
+  const headers = {
+    Authorization: `token ${p.token}`,
+    "User-Agent": "ObsidianGitHubSync",
+    "Content-Type": "application/json",
+    Accept: "application/vnd.github+json",
+  };
+
+  const res = await requestUrl({
+    url: `https://api.github.com/repos/${owner}/${repo}/pulls`,
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      title: p.title,
+      head: p.head,
+      base: p.base,
+      body: p.body ?? "",
+    }),
+    throw: false,
+  });
+
+  if (res.status === 201) {
+    const created = res.json as GitHubPullCreated | null;
+    return { ok: true, url: created?.html_url, number: created?.number };
+  }
+
+  if (res.status === 422) {
+    const body = res.json as GitHubValidationError | null;
+    const errMsg = body?.errors?.[0]?.message ?? body?.message ?? "";
+    if (/no commits between/i.test(errMsg)) {
+      return { ok: false, reason: `No commits between ${p.base} and ${p.head} — sync the branch first so the remote has your changes.` };
+    }
+    if (/already exists/i.test(errMsg)) {
+      const existing = await findExistingOpenPr(owner, repo, p.head, p.base, p.token);
+      return {
+        ok: false,
+        reason: `A pull request from ${p.head} → ${p.base} is already open.`,
+        existingUrl: existing ?? undefined,
+      };
+    }
+    return { ok: false, reason: errMsg || `GitHub rejected the request (422).` };
+  }
+
+  if (res.status === 404) {
+    const explained = await explainNotFound(owner, repo, p.token);
+    return { ok: false, reason: explained };
+  }
+  if (res.status === 401) {
+    return { ok: false, reason: "Token is invalid or expired — generate a new one and paste it in Settings." };
+  }
+  if (res.status === 403) {
+    const apiMsg = (res.json as GitHubErrorBody | null)?.message ?? "";
+    if (/SAML/i.test(apiMsg)) {
+      return { ok: false, reason: "SSO not authorized for this token — open the token on GitHub and authorize SSO for this org." };
+    }
+    return {
+      ok: false,
+      reason: "GitHub rejected the PR request (403). For fine-grained tokens, make sure the token grants 'Pull requests: Read and write' on this repo.",
+    };
+  }
+  return { ok: false, reason: `GitHub returned ${res.status}` };
+}
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+
+/**
+ * Look up the existing open PR for head → base. Used to surface a useful
+ * URL when createPullRequest hits the "already exists" 422 case.
+ */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+async function findExistingOpenPr(
+  owner: string,
+  repo: string,
+  head: string,
+  base: string,
+  token: string,
+): Promise<string | null> {
+  const headers = {
+    Authorization: `token ${token}`,
+    "User-Agent": "ObsidianGitHubSync",
+    Accept: "application/vnd.github+json",
+  };
+  // GitHub's PR list filter wants the `head` qualifier as "<owner>:<branch>".
+  const res = await requestUrl({
+    url: `https://api.github.com/repos/${owner}/${repo}/pulls?state=open&head=${encodeURIComponent(`${owner}:${head}`)}&base=${encodeURIComponent(base)}`,
+    headers,
+    throw: false,
+  });
+  if (res.status !== 200) return null;
+  const list = res.json as GitHubPullSummary[] | null;
+  if (!Array.isArray(list) || list.length === 0) return null;
+  return list[0]?.html_url ?? null;
+}
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+
 /**
  * True when a git push failure looks like a *permission* issue on the
  * target branch — typically pushing to a protected default branch

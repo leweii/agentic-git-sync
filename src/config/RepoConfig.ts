@@ -69,7 +69,7 @@ export function parseRepoConfig(raw: unknown): RepoConfigV1 | null {
       openaiModel: typeof ai.openaiModel === "string" ? ai.openaiModel : "gpt-5.5",
       geminiModel: typeof ai.geminiModel === "string" ? ai.geminiModel : "gemini-2.5-flash",
       claudeModel: typeof ai.claudeModel === "string" ? ai.claudeModel : "claude-sonnet-4-5",
-      deepseekModel: typeof ai.deepseekModel === "string" ? ai.deepseekModel : "deepseek-v4-flash",
+      deepseekModel: typeof ai.deepseekModel === "string" ? ai.deepseekModel : "deepseek-chat",
       sendFilePaths: typeof ai.sendFilePaths === "boolean" ? ai.sendFilePaths : true,
       sendGitMetadata: typeof ai.sendGitMetadata === "boolean" ? ai.sendGitMetadata : true,
       sendSurroundingContext:

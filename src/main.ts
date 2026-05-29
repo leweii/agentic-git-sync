@@ -5,10 +5,12 @@ import { EventLog } from "./observability/EventLog";
 import { GitHubSyncSettings, DEFAULT_SETTINGS, GitHubSyncSettingTab, migrateStaleModels } from "./settings";
 import { GitManager } from "./git/GitManager";
 import { SubmoduleManager } from "./git/SubmoduleManager";
-import { ensureRemoteHasCommits, ensureRemoteBranch, isPushPermissionError } from "./git/githubApi";
+import { ensureRemoteHasCommits, ensureRemoteBranch, isPushPermissionError, createPullRequest } from "./git/githubApi";
 import { SyncScheduler } from "./sync/SyncScheduler";
 import { StatusBar } from "./ui/StatusBar";
 import { SyncDashboard, DASHBOARD_VIEW_TYPE } from "./ui/SyncDashboard";
+import { CreatePRModal } from "./ui/CreatePRModal";
+import { generatePRSummary } from "./ai/PRSummary";
 import { LocalChangesModal } from "./ui/LocalChangesModal";
 import { FileHistoryModal } from "./ui/FileHistoryModal";
 import { SwitchBranchModal } from "./ui/SwitchBranchModal";
@@ -487,6 +489,70 @@ export default class GitHubSyncPlugin extends Plugin {
       new Notice(`Couldn't remove ${sub.localPath}: ${(e as Error).message}`, 8000);
       throw e;
     }
+  }
+
+  /**
+   * Open the Create-PR modal for a submodule. Driven by the dashboard's
+   * PR button, which only renders when team mode + upstreamBranch is
+   * configured and differs from the working branch.
+   *
+   * The actual push + API call is deferred to the modal's submit
+   * callback so transient failures keep the modal open for retry.
+   */
+  async openCreatePRForSubmodule(id: string): Promise<void> {
+    const sub = this.settings.submodules.find((s) => s.id === id);
+    if (!sub) {
+      new Notice(L().dashboard.conflictModalErr);
+      return;
+    }
+    if (!sub.upstreamBranch || sub.upstreamBranch === sub.branch) {
+      // Defensive: button shouldn't be shown in this case.
+      return;
+    }
+    if (!this.settings.githubToken) {
+      new Notice(L().settings.testNoToken, 6000);
+      return;
+    }
+
+    const gm = this.submoduleManager.gitManagerFor(sub);
+    const defaultTitle = (await gm.lastCommitSubject(sub.branch)) || `${sub.branch} → ${sub.upstreamBranch}`;
+
+    // Capture for the closure — narrows from `string | undefined`.
+    const head = sub.branch;
+    const base = sub.upstreamBranch;
+
+    const aiProviders = this.buildAIProviders();
+    const generate = aiProviders.some((p) => p.isAvailable())
+      ? async () => {
+          const { commits, diffStat } = await gm.branchSummary(head, base);
+          return await generatePRSummary(aiProviders, { head, base, commits, diffStat });
+        }
+      : undefined;
+
+    new CreatePRModal(this.app, {
+      head,
+      base,
+      defaultTitle,
+      generate,
+      loadChanges: () => gm.branchDiff(head, base),
+      submit: async (title, body) => {
+        const t = L().pr;
+        try {
+          await gm.pushCurrent(head);
+        } catch (e) {
+          const reason = friendlyError((e as Error).message ?? String(e));
+          return { ok: false, reason: tf(t.pushFailed, reason) };
+        }
+        return await createPullRequest({
+          remoteUrl: sub.remoteUrl,
+          token: this.settings.githubToken,
+          head,
+          base,
+          title,
+          body,
+        });
+      },
+    }).open();
   }
 
   /**

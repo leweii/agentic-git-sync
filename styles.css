@@ -3129,43 +3129,45 @@
 
 /* ── Edit-submodule modal ───────────────────────────────────── */
 
-.ghs-es-modal { padding: 0; }
-.ghs-es-modal .modal-content { padding: 0; }
+.ghs-es-modal, .ghs-pr-modal { padding: 0; }
+.ghs-es-modal .modal-content, .ghs-pr-modal .modal-content { padding: 0; }
 
-.ghs-es-header {
+.ghs-es-header, .ghs-pr-header {
   padding: 20px 24px 14px;
   border-bottom: 1px solid var(--background-modifier-border);
 }
-.ghs-es-title-row {
+.ghs-es-title-row, .ghs-pr-title-row {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-bottom: 6px;
 }
-.ghs-es-title-row h3 { margin: 0; font-size: 1.05em; }
-.ghs-es-title-icon { display: flex; color: var(--color-accent); }
-.ghs-es-title-icon svg { width: 18px; height: 18px; }
-.ghs-es-subtitle {
+.ghs-es-title-row h3, .ghs-pr-title-row h3 { margin: 0; font-size: 1.05em; }
+.ghs-es-title-icon, .ghs-pr-title-icon { display: flex; color: var(--color-accent); }
+.ghs-es-title-icon svg, .ghs-pr-title-icon svg { width: 18px; height: 18px; }
+.ghs-es-subtitle, .ghs-pr-subtitle {
   margin: 0;
   font-size: 0.85em;
   color: var(--text-muted);
   line-height: 1.45;
 }
 
-.ghs-es-body {
+.ghs-es-body, .ghs-pr-body {
   padding: 14px 24px 8px;
 }
-.ghs-es-field {
+.ghs-es-field, .ghs-pr-field {
   margin-bottom: 14px;
 }
-.ghs-es-field > label {
+.ghs-es-field > label, .ghs-pr-field > label {
   display: block;
   font-size: 0.88em;
   font-weight: 500;
   margin-bottom: 6px;
   color: var(--text-normal);
 }
-.ghs-es-field input[type="text"] {
+.ghs-es-field input[type="text"],
+.ghs-pr-field input[type="text"],
+.ghs-pr-field textarea {
   width: 100%;
   padding: 6px 10px;
   border-radius: 5px;
@@ -3174,7 +3176,15 @@
   color: var(--text-normal);
   font-size: 0.9em;
 }
-.ghs-es-field input[type="text"]:focus {
+.ghs-pr-field textarea {
+  resize: vertical;
+  min-height: 80px;
+  font-family: inherit;
+  line-height: 1.45;
+}
+.ghs-es-field input[type="text"]:focus,
+.ghs-pr-field input[type="text"]:focus,
+.ghs-pr-field textarea:focus {
   outline: none;
   border-color: var(--color-accent);
 }
@@ -3192,7 +3202,7 @@
   line-height: 1.4;
 }
 
-.ghs-es-status {
+.ghs-es-status, .ghs-pr-status {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3201,22 +3211,403 @@
   border-top: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
 }
-.ghs-es-status svg { width: 14px; height: 14px; flex-shrink: 0; }
-.ghs-es-status.loading { color: var(--text-muted); }
-.ghs-es-status.loading svg { animation: ghs-spin 1.2s linear infinite; }
-.ghs-es-status.success { color: var(--color-green); }
-.ghs-es-status.error   { color: var(--color-red); }
+.ghs-es-status svg, .ghs-pr-status svg { width: 14px; height: 14px; flex-shrink: 0; }
+.ghs-es-status.loading, .ghs-pr-status.loading { color: var(--text-muted); }
+.ghs-es-status.loading svg, .ghs-pr-status.loading svg { animation: ghs-spin 1.2s linear infinite; }
+.ghs-es-status.success, .ghs-pr-status.success { color: var(--color-green); }
+.ghs-es-status.error, .ghs-pr-status.error     { color: var(--color-red); }
 
-.ghs-es-footer {
+.ghs-es-footer, .ghs-pr-footer {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   padding: 14px 24px;
   border-top: 1px solid var(--background-modifier-border);
 }
-.ghs-es-cancel-btn { padding: 6px 14px; }
-.ghs-es-save-btn { padding: 6px 16px; font-weight: 600; }
-.ghs-es-save-btn:disabled { opacity: 0.5; cursor: default; }
+.ghs-es-cancel-btn, .ghs-pr-cancel-btn { padding: 6px 14px; }
+.ghs-pr-regen-btn { padding: 6px 12px; margin-right: auto; }
+.ghs-pr-regen-btn:disabled { opacity: 0.5; cursor: default; }
+
+.ghs-pr-link-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+.ghs-pr-link-input {
+  flex: 1;
+  font-family: var(--font-monospace);
+  font-size: 0.85em;
+  background: var(--background-secondary) !important;
+  cursor: text;
+}
+.ghs-pr-link-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.ghs-pr-link-action:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.ghs-pr-link-action svg { width: 16px; height: 16px; }
+.ghs-es-save-btn, .ghs-pr-submit-btn { padding: 6px 16px; font-weight: 600; }
+.ghs-es-save-btn:disabled, .ghs-pr-submit-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ════════════════════════════════════════════════════════════
+   Create-PR modal v2 — refined composition
+   Overrides the shared .ghs-pr-* rules above (defined later in
+   the cascade). EditSubmoduleModal still uses .ghs-es-* on its
+   own.
+   ════════════════════════════════════════════════════════════ */
+
+.ghs-create-pr-modal { width: 560px; max-width: 92vw; transition: width 0.22s ease; }
+.ghs-create-pr-modal--wide { width: 860px; }
+
+.ghs-pr-eyebrow {
+  font-family: var(--font-monospace);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  padding: 18px 24px 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.ghs-pr-eyebrow-tag {
+  text-transform: uppercase;
+  color: var(--text-faint);
+  letter-spacing: 0.12em;
+  margin-right: 2px;
+}
+.ghs-pr-eyebrow-branch { color: var(--text-normal); }
+
+.ghs-pr-modal .ghs-pr-body { padding: 16px 24px 4px; }
+
+/* Override the aliased field styling — float-label layout. */
+.ghs-pr-modal .ghs-pr-field {
+  position: relative;
+  margin-bottom: 10px;
+  background: var(--background-secondary);
+  border-radius: 8px;
+  padding: 22px 12px 10px;
+  transition: box-shadow 0.15s ease;
+}
+.ghs-pr-modal .ghs-pr-field:focus-within {
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+.ghs-pr-float-label {
+  position: absolute;
+  top: 7px;
+  left: 12px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.ghs-pr-modal .ghs-pr-input,
+.ghs-pr-modal .ghs-pr-textarea {
+  width: 100%;
+  background: transparent !important;
+  border: none !important;
+  outline: none;
+  color: var(--text-normal);
+  font-size: 14px;
+  padding: 0;
+  box-shadow: none !important;
+}
+.ghs-pr-modal .ghs-pr-input { font-weight: 500; padding-right: 28px; /* room for ✦ */ }
+.ghs-pr-modal .ghs-pr-textarea {
+  resize: vertical;
+  min-height: 96px;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+/* Drafting shimmer — top edge */
+@keyframes ghs-pr-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.ghs-pr-field--drafting {
+  overflow: hidden;
+}
+.ghs-pr-field--drafting::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--color-accent) 30%,
+    var(--text-accent, var(--color-accent)) 50%,
+    transparent 80%
+  );
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  animation: ghs-pr-shimmer 1.6s linear infinite;
+  pointer-events: none;
+}
+
+/* Static ✦ glyph (Drafted state) */
+.ghs-pr-ai-glyph {
+  position: absolute;
+  top: 14px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 4px;
+  opacity: 0.55;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.ghs-pr-ai-glyph:hover {
+  color: var(--color-accent);
+  opacity: 1;
+  background: var(--background-modifier-hover);
+}
+
+/* ── Changes panel ─────────────────────────────────────────── */
+
+.ghs-pr-changes {
+  margin: 8px 24px 8px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.ghs-pr-changes-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 4px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12.5px;
+  text-align: left;
+}
+.ghs-pr-changes-toggle:hover { color: var(--text-normal); }
+.ghs-pr-changes-chev {
+  display: flex;
+  transition: transform 0.18s ease;
+  color: var(--text-faint);
+}
+.ghs-pr-changes-chev svg { width: 14px; height: 14px; }
+.ghs-pr-changes--expanded .ghs-pr-changes-chev { transform: rotate(90deg); }
+.ghs-pr-changes-summary { font-family: var(--font-monospace); font-size: 12px; }
+
+/* Empty-diff state — branch is up to date, can't PR. */
+.ghs-pr-changes--empty .ghs-pr-changes-toggle { cursor: default; }
+.ghs-pr-changes--empty .ghs-pr-changes-chev { opacity: 0.3; }
+.ghs-pr-changes--empty .ghs-pr-changes-summary {
+  font-family: inherit;
+  color: var(--color-green);
+  opacity: 0.85;
+}
+
+.ghs-pr-changes-body {
+  padding-top: 4px;
+  padding-bottom: 8px;
+}
+.ghs-pr-changes-loading {
+  padding: 16px 0;
+  text-align: center;
+  color: var(--text-faint);
+}
+.ghs-pr-changes-empty {
+  padding: 14px 8px;
+  color: var(--text-faint);
+  font-size: 12.5px;
+  font-style: italic;
+}
+
+.ghs-pr-changes-split {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  overflow: hidden;
+  height: 360px;  /* explicit height so child overflow can scroll */
+}
+.ghs-pr-file-list {
+  border-right: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0;
+  min-height: 0;  /* allow grid child to scroll */
+}
+.ghs-pr-file-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 12px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  overflow: hidden;
+}
+.ghs-pr-file-row:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.ghs-pr-file-row.is-active {
+  background: var(--background-primary);
+  color: var(--text-normal);
+  border-left-color: var(--color-accent);
+}
+.ghs-pr-file-path {
+  font-family: var(--font-monospace);
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+  width: 100%;
+}
+.ghs-pr-file-stats {
+  display: flex;
+  gap: 6px;
+  font-family: var(--font-monospace);
+  font-size: 10.5px;
+}
+.ghs-pr-add { color: var(--color-green); }
+.ghs-pr-del { color: var(--color-red); }
+
+.ghs-pr-diff-pane {
+  overflow: auto;
+  background: var(--background-primary);
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  padding: 6px 0;
+  min-height: 0;  /* allow grid child to scroll */
+  min-width: 0;
+}
+.ghs-pr-diff-hunk { margin-bottom: 6px; }
+.ghs-pr-diff-hunk-header {
+  background: var(--background-secondary);
+  color: var(--text-faint);
+  padding: 3px 12px;
+  font-size: 11px;
+}
+.ghs-pr-diff-line {
+  display: flex;
+  padding: 0 8px;
+  line-height: 1.55;
+}
+.ghs-pr-diff-marker {
+  width: 16px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  text-align: center;
+}
+.ghs-pr-diff-text {
+  white-space: pre-wrap;
+  word-break: break-all;
+  flex: 1;
+}
+.ghs-pr-diff-line--add { background: rgba(40, 167, 69, 0.10); }
+.ghs-pr-diff-line--add .ghs-pr-diff-marker { color: var(--color-green); }
+.ghs-pr-diff-line--del { background: rgba(220, 53, 69, 0.10); }
+.ghs-pr-diff-line--del .ghs-pr-diff-marker { color: var(--color-red); }
+.ghs-pr-diff-line--ctx { color: var(--text-muted); }
+.ghs-pr-diff-empty { padding: 14px; color: var(--text-faint); font-style: italic; }
+.ghs-pr-diff-truncated {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-style: italic;
+  text-align: center;
+  border-top: 1px dashed var(--background-modifier-border);
+}
+
+/* ── Footer override — calmer, one weighted action ────────── */
+
+.ghs-pr-modal .ghs-pr-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  padding: 14px 24px 18px;
+  border-top: none;
+}
+.ghs-pr-cancel-link {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 6px 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  border-radius: 4px;
+}
+.ghs-pr-cancel-link:hover { color: var(--text-normal); }
+.ghs-pr-modal .ghs-pr-submit-btn { padding: 7px 18px; font-weight: 600; }
+
+/* ── Success view (refined) ─────────────────────────────── */
+
+.ghs-pr-success-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 24px 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.ghs-pr-success-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-green);
+  color: white;
+  flex-shrink: 0;
+}
+.ghs-pr-success-icon svg { width: 14px; height: 14px; }
+.ghs-pr-success-title {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.ghs-pr-modal .ghs-pr-link-row {
+  align-items: center;
+  gap: 8px;
+}
+.ghs-pr-modal .ghs-pr-link-input {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  font-family: var(--font-monospace);
+  font-size: 12.5px;
+  padding: 0;
+}
+.ghs-pr-modal .ghs-pr-link-action {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.ghs-pr-modal .ghs-pr-link-action svg { width: 14px; height: 14px; }
 
 /* ── Generic confirm dialog (used for submodule removal) ───── */
 

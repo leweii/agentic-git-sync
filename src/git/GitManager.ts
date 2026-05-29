@@ -364,6 +364,207 @@ export class GitManager {
     }
   }
 
+  /**
+   * Push the local `branch` to origin (creating/updating the upstream
+   * tracking ref). No commit, no staging — just publishes whatever is
+   * already committed locally. Used by the team-mode PR flow so the
+   * remote head ref reflects local commits before the API call.
+   */
+  async pushCurrent(branch: string, onProgress?: ProgressFn): Promise<void> {
+    await this.ready;
+    onProgress?.({ phase: "pushing", message: `Pushing to origin/${branch}` });
+    await this.runWithRetry(["push", "--set-upstream", "origin", branch], 3, onProgress);
+  }
+
+  /** Most recent commit subject on `branch`. Returns "" if unavailable. */
+  async lastCommitSubject(branch?: string): Promise<string> {
+    await this.ready;
+    try {
+      const ref = branch ? branch : "HEAD";
+      const out = await this.git.raw(["log", "-1", "--format=%s", ref]);
+      return out.trim();
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * Parse `git diff base...head` into a structured per-file/per-hunk
+   * shape the UI can render. Truncates each file's hunks at
+   * `maxLinesPerFile` and adds a sentinel marker so the renderer can
+   * surface "show full diff" without us shipping megabytes of text
+   * into a modal for a vault-sized markdown commit.
+   *
+   * Best-effort: returns an empty list if either branch is missing
+   * locally or the diff command fails. Never throws.
+   */
+  async branchDiff(
+    head: string,
+    base: string,
+    opts: { maxLinesPerFile?: number; maxFiles?: number } = {},
+  ): Promise<{
+    files: Array<{
+      path: string;
+      additions: number;
+      deletions: number;
+      hunks: Array<{ header: string; lines: Array<{ kind: "add" | "del" | "ctx"; text: string }> }>;
+      truncated: boolean;
+    }>;
+    totalAdditions: number;
+    totalDeletions: number;
+  }> {
+    await this.ready;
+    const maxLinesPerFile = opts.maxLinesPerFile ?? 40;
+    const maxFiles = opts.maxFiles ?? 50;
+
+    // Always compare against `origin/<base>`, not the local ref. The
+    // local copy of `base` is often stale (e.g., right after a PR was
+    // merged via GitHub UI, local `main` hasn't been fast-forwarded),
+    // which makes the diff falsely show "many files" — all of jakob's
+    // already-merged commits that the local main hasn't caught up on.
+    // Fetch the tip first so origin/<base> is fresh.
+    const remoteBase = await this.resolveFreshBaseRef(base);
+
+    let raw: string;
+    try {
+      raw = await this.git.raw(["diff", "--no-color", `${remoteBase}...${head}`]);
+    } catch {
+      return { files: [], totalAdditions: 0, totalDeletions: 0 };
+    }
+    if (!raw.trim()) return { files: [], totalAdditions: 0, totalDeletions: 0 };
+
+    const lines = raw.split("\n");
+    type File = {
+      path: string;
+      additions: number;
+      deletions: number;
+      hunks: Array<{ header: string; lines: Array<{ kind: "add" | "del" | "ctx"; text: string }> }>;
+      truncated: boolean;
+    };
+    const files: File[] = [];
+    let current: File | null = null;
+    let linesInCurrentFile = 0;
+
+    const newFile = (path: string): File => ({
+      path,
+      additions: 0,
+      deletions: 0,
+      hunks: [],
+      truncated: false,
+    });
+
+    for (const line of lines) {
+      if (line.startsWith("diff --git ")) {
+        if (current) files.push(current);
+        if (files.length >= maxFiles) {
+          current = null;
+          break;
+        }
+        // "diff --git a/foo/bar.ts b/foo/bar.ts" → "foo/bar.ts"
+        const m = line.match(/^diff --git a\/(.+) b\/.+$/);
+        current = newFile(m?.[1] ?? "(unknown)");
+        linesInCurrentFile = 0;
+        continue;
+      }
+      if (!current) continue;
+      if (line.startsWith("@@")) {
+        const headerEnd = line.indexOf("@@", 2);
+        const header = headerEnd > 0 ? line.slice(0, headerEnd + 2) : line;
+        current.hunks.push({ header, lines: [] });
+        continue;
+      }
+      if (line.startsWith("+++") || line.startsWith("---") ||
+          line.startsWith("index ") || line.startsWith("new file") ||
+          line.startsWith("deleted file") || line.startsWith("similarity ") ||
+          line.startsWith("rename ") || line.startsWith("Binary files ")) {
+        continue;
+      }
+      const hunk = current.hunks[current.hunks.length - 1];
+      if (!hunk) continue;
+
+      let kind: "add" | "del" | "ctx";
+      if (line.startsWith("+")) { kind = "add"; current.additions++; }
+      else if (line.startsWith("-")) { kind = "del"; current.deletions++; }
+      else { kind = "ctx"; }
+
+      if (linesInCurrentFile < maxLinesPerFile) {
+        hunk.lines.push({ kind, text: line.length > 0 ? line.slice(1) : line });
+        linesInCurrentFile++;
+      } else {
+        current.truncated = true;
+        // Keep counting +/− totals but stop appending lines.
+      }
+    }
+    if (current) files.push(current);
+
+    const totalAdditions = files.reduce((n, f) => n + f.additions, 0);
+    const totalDeletions = files.reduce((n, f) => n + f.deletions, 0);
+    return { files, totalAdditions, totalDeletions };
+  }
+
+  /**
+   * Best-effort snapshot of what would land in a `head` → `base` PR:
+   * commit subjects in chronological order (oldest first) plus a
+   * truncated `--stat` diff. Used to seed the AI PR-summary generator
+   * with concrete inputs rather than just branch names.
+   *
+   * Returns empty arrays/strings if either git invocation fails — the
+   * caller falls back to a plain default in that case, so this never
+   * throws.
+   */
+  /**
+   * Fetch `base` from origin so the comparison ref is fresh, then
+   * return whichever name we can actually resolve. Returns `origin/<base>`
+   * when the fetch lands, otherwise falls back to the local ref name so
+   * the caller can still produce a (possibly stale) diff offline.
+   */
+  private async resolveFreshBaseRef(base: string): Promise<string> {
+    try {
+      await this.git.raw(["fetch", "--no-tags", "origin", base]);
+    } catch { /* offline / missing remote — fall through to local */ }
+    try {
+      await this.git.raw(["rev-parse", "--verify", `origin/${base}`]);
+      return `origin/${base}`;
+    } catch {
+      return base;
+    }
+  }
+
+  async branchSummary(
+    head: string,
+    base: string,
+    opts: { maxCommits?: number; maxStatChars?: number } = {},
+  ): Promise<{ commits: string[]; diffStat: string }> {
+    await this.ready;
+    const maxCommits = opts.maxCommits ?? 20;
+    const maxStatChars = opts.maxStatChars ?? 4000;
+
+    // Same fresh-ref dance as branchDiff — without it, post-merge the
+    // AI keeps seeing every commit that the stale local base hasn't
+    // caught up on.
+    const remoteBase = await this.resolveFreshBaseRef(base);
+
+    let commits: string[] = [];
+    try {
+      const out = await this.git.raw([
+        "log",
+        `-n${maxCommits}`,
+        "--reverse",
+        "--format=%s",
+        `${remoteBase}..${head}`,
+      ]);
+      commits = out.split("\n").map((l) => l.trim()).filter(Boolean);
+    } catch { /* base/head missing locally — fall through */ }
+
+    let diffStat = "";
+    try {
+      const out = await this.git.raw(["diff", "--stat", `${remoteBase}...${head}`]);
+      diffStat = out.length > maxStatChars ? out.slice(0, maxStatChars) + "\n…(truncated)" : out;
+    } catch { /* same */ }
+
+    return { commits, diffStat };
+  }
+
   async pull(branch = "main", onProgress?: ProgressFn): Promise<void> {
     await this.ready;
     onProgress?.({ phase: "pulling", message: `Pulling origin/${branch}` });

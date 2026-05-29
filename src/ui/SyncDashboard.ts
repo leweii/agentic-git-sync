@@ -239,6 +239,23 @@ export class SyncDashboard extends ItemView {
     setIcon(syncBtn, "refresh-cw");
     syncBtn.onclick = () => this.syncOne(state.id);
 
+    // Team-mode PR button — only rendered for submodules where
+    // upstreamBranch is set and differs from the working branch (the
+    // condition the user spelled out: feature → main is meaningful, but
+    // pushing main → main is not). Main vault has no upstreamBranch field,
+    // so the button never shows there.
+    if (state.id !== VAULT_REPO_ID && this.plugin.settings.usageMode === "team") {
+      const sub = this.plugin.settings.submodules.find((s) => s.id === state.id);
+      if (sub?.upstreamBranch && sub.upstreamBranch !== sub.branch) {
+        const prBtn = actions.createEl("button", {
+          cls: "ghs-icon-btn",
+          attr: { title: L().pr.buttonTooltip },
+        });
+        setIcon(prBtn, "git-pull-request");
+        prBtn.onclick = () => void this.plugin.openCreatePRForSubmodule(state.id);
+      }
+    }
+
     // Submodule cards get a remove button — main vault is removed via
     // Settings. Cross-branch merges run automatically via upstreamBranch
     // during sync; no separate "Pull from..." button needed.

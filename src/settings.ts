@@ -103,6 +103,10 @@ const STALE_MODEL_REPLACEMENTS: Record<string, string> = {
   "gpt-4o-mini":         "gpt-5.5",
   "gpt-4.1-mini":        "gpt-5.5",
   "gpt-4.1-nano":        "gpt-5.5",
+  // `deepseek-v4-flash` was the placeholder default in early builds but
+  // never existed on the DeepSeek API — requests 400 on "unknown model".
+  // Roll forward to the documented chat alias.
+  "deepseek-v4-flash":   "deepseek-chat",
 };
 
 export function migrateStaleModels(ai: AISettings): AISettings {
@@ -155,7 +159,7 @@ export const DEFAULT_SETTINGS: GitHubSyncSettings = {
     claudeToken: "",
     claudeModel: "claude-sonnet-4-5",
     deepseekToken: "",
-    deepseekModel: "deepseek-v4-flash",
+    deepseekModel: "deepseek-chat",
     sendFilePaths: true,
     sendGitMetadata: true,
     sendSurroundingContext: true,
