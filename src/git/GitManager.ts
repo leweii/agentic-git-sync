@@ -953,6 +953,15 @@ export class GitManager {
       return localChanges?.total ?? 0;
     }
 
+    // Repo already exists — make origin follow the configured remote. The
+    // URL can change after init (e.g. the user edits it inline in Settings,
+    // or a synced .github-sync.json brings a new value): without this, sync
+    // would keep pulling/pushing against the stale origin from when the repo
+    // was first connected. setOrigin only rewrites when the URL differs.
+    if (opts.remoteUrl) {
+      await this.setOrigin(opts.remoteUrl, branch);
+    }
+
     const ignore = opts.ignorePatterns ?? [];
 
     // If ConflictModal resolved a merge (files written + staged) but deferred

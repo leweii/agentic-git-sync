@@ -20,12 +20,14 @@ export interface SubmoduleConfig {
   remoteUrl: string;
   branch: string;
   /**
-   * Optional "always merge in" source branch. When set and different
-   * from `branch`, every sync fetches `origin/<upstreamBranch>` and
-   * merges it into the working branch before pushing. Lets a team
-   * member working on `jakob-edits` automatically pick up changes
-   * teammates pushed to `main`. Conflicts surface via the normal
-   * ConflictModal flow.
+   * Baseline branch (team mode only; undefined in personal mode). Set
+   * to the repo's default branch when a submodule is added. When it
+   * differs from `branch`, every sync fetches `origin/<upstreamBranch>`
+   * and merges it into the working branch before pushing — letting a
+   * team member on `jakob-edits` automatically pick up changes teammates
+   * pushed to `main`. When it equals `branch`, the merge is a no-op and
+   * the user is simply working directly on the baseline. Conflicts on
+   * the cross-branch merge auto-resolve in favour of the baseline.
    */
   upstreamBranch?: string;
   autoSync: boolean;

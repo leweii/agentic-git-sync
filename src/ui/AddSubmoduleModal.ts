@@ -9,6 +9,9 @@ export class AddSubmoduleModal extends Modal {
   private remoteUrl = "";
   private branch = "main";
   private upstreamBranch = "";
+  private upstreamEdited = false;
+  private defaultBranch = "";
+  private upInput: HTMLInputElement | null = null;
   private isTeamMode: boolean;
   private remoteStatus: "idle" | "loading" | "valid" | "invalid" = "idle";
   private remoteMsg = "";
@@ -93,16 +96,34 @@ export class AddSubmoduleModal extends Modal {
     const upHint = upWrap.createDiv("ghs-field-hint");
     upHint.setText(t.addSubUpstreamHint);
     const upInput = upWrap.createEl("input", { attr: { placeholder: t.addSubUpstreamPh } });
-    upInput.oninput = () => (this.upstreamBranch = upInput.value.trim());
+    this.upInput = upInput;
+    upInput.oninput = () => {
+      this.upstreamBranch = upInput.value.trim();
+      this.upstreamEdited = true;
+      this.refreshSubmit();
+    };
+    // Team mode requires a baseline branch — never empty. Seed it with the
+    // working-branch default now; probeRemote upgrades this to the repo's
+    // real default branch once known (unless the user has typed their own).
+    if (this.isTeamMode) {
+      this.upstreamBranch = this.branch;
+      upInput.value = this.branch;
+    }
 
     teamBtn.onclick = () => {
       this.isTeamMode = !this.isTeamMode;
       teamBtn.toggleClass("active", this.isTeamMode);
       upWrap.toggleClass("ghs-hidden", !this.isTeamMode);
-      if (!this.isTeamMode) {
+      if (this.isTeamMode) {
+        if (!this.upstreamEdited) {
+          this.upstreamBranch = this.defaultBranch || this.branch;
+          upInput.value = this.upstreamBranch;
+        }
+      } else {
         this.upstreamBranch = "";
         upInput.value = "";
       }
+      this.refreshSubmit();
     };
 
     // ── Footer ─────────────────────────────────────────────────
@@ -161,6 +182,13 @@ export class AddSubmoduleModal extends Modal {
         this.remoteIsEmpty = commits.status === 409;
         this.remoteStatus = "valid";
         this.remoteMsg = tf(t.addSubRemoteFound, `${owner}/${repo}`);
+        // Auto-fill the baseline branch with the repo's default branch
+        // unless the user has already typed their own value.
+        this.defaultBranch = (res.json?.default_branch as string) || "";
+        if (this.isTeamMode && !this.upstreamEdited && this.defaultBranch && this.upInput) {
+          this.upstreamBranch = this.defaultBranch;
+          this.upInput.value = this.defaultBranch;
+        }
       } else if (res.status === 404) {
         this.remoteStatus = "invalid";
         this.remoteMsg = t.addSubRepoNotFound;
@@ -219,7 +247,9 @@ export class AddSubmoduleModal extends Modal {
     const ok =
       this.localPath.length > 0 &&
       this.pathStatus === "ok" &&
-      urlSyntaxOk;
+      urlSyntaxOk &&
+      // Team mode requires a baseline branch; it may equal the local branch.
+      (!this.isTeamMode || this.upstreamBranch.length > 0);
     this.submitBtn.disabled = !ok;
   }
 
@@ -229,12 +259,10 @@ export class AddSubmoduleModal extends Modal {
       localPath: this.localPath,
       remoteUrl: this.remoteUrl,
       branch: this.branch,
-      // Persist only when set and different from the working branch —
-      // a no-op upstream config would just clutter the saved file.
-      upstreamBranch:
-        this.upstreamBranch && this.upstreamBranch !== this.branch
-          ? this.upstreamBranch
-          : undefined,
+      // Team mode always records a baseline branch (defaulting to the
+      // working branch, which means "work directly on the baseline").
+      // Personal mode has no baseline concept.
+      upstreamBranch: this.isTeamMode ? this.upstreamBranch || this.branch : undefined,
       autoSync: true,
       syncInterval: this.plugin.settings.autoSyncInterval,
     };

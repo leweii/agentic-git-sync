@@ -81,20 +81,24 @@ export class EditSubmoduleModal extends Modal {
       });
     });
 
-    // Upstream branch — team workflow only. In personal mode the field is
-    // hidden, but we still display the saved value as read-only context so a
-    // user who flips between modes doesn't silently lose a configured value.
+    // Upstream branch — team workflow only. Personal mode has a single
+    // managed branch, so the field is hidden and any baseline is cleared
+    // on save (see below).
     if (this.plugin.settings.usageMode === "team") {
-      this.formField(body, "Upstream branch (optional)", (wrap) => {
+      // Baseline is required in team mode; default to the working branch
+      // ("work directly on the baseline") so the field is never empty.
+      if (!this.upstreamBranch) this.upstreamBranch = this.branch;
+      this.formField(body, "Upstream branch", (wrap) => {
         // eslint-disable-next-line obsidianmd/ui/sentence-case -- "main" is a branch name, not UI prose
-        const input = wrap.createEl("input", { attr: { type: "text", placeholder: "main (leave empty to disable)" } });
+        const input = wrap.createEl("input", { attr: { type: "text", placeholder: "main" } });
         input.value = this.upstreamBranch;
         input.oninput = () => (this.upstreamBranch = input.value.trim());
         wrap.createDiv({
           cls: "ghs-es-hint",
           text:
-            "When set, every sync of this submodule merges in changes from this branch before pushing. " +
-            "On conflict, the upstream side wins — local edits are kept in git history (reflog).",
+            "Every sync merges in this baseline branch before pushing. Set it the same as the branch above " +
+            "to work directly on the baseline, or a different branch to absorb its updates into your own. " +
+            "On conflict, the baseline wins — local edits are kept in git history (reflog).",
         });
       });
     }
@@ -143,15 +147,18 @@ export class EditSubmoduleModal extends Modal {
       this.showStatus("Branch is required.", "error");
       return;
     }
-    if (this.upstreamBranch && this.upstreamBranch === this.branch) {
-      this.showStatus("Upstream branch must differ from the working branch.", "error");
+    const isTeam = this.plugin.settings.usageMode === "team";
+    if (isTeam && !this.upstreamBranch) {
+      this.showStatus("Upstream branch is required in team mode.", "error");
       return;
     }
 
     const changes = {
       remoteUrl: this.remoteUrl,
       branch: this.branch,
-      upstreamBranch: this.upstreamBranch || undefined,
+      // Team mode persists the baseline (may equal the working branch);
+      // personal mode has no baseline concept.
+      upstreamBranch: isTeam ? this.upstreamBranch || this.branch : undefined,
       autoSync: this.autoSync,
     };
 
