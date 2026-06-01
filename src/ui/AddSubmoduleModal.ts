@@ -80,10 +80,11 @@ export class AddSubmoduleModal extends Modal {
     const branchLabelRow = branchWrap.createDiv("ghs-field-label-row");
     branchLabelRow.createEl("label", { text: t.addSubBranch });
     const teamBtn = branchLabelRow.createEl("button", {
-      cls: `ghs-chip${this.isTeamMode ? " active" : ""}`,
-      text: t.addSubTeamMode,
+      cls: `ghs-mode-toggle${this.isTeamMode ? " active" : ""}`,
+      attr: { type: "button", role: "switch", "aria-checked": String(this.isTeamMode) },
     });
-    setIcon(teamBtn.createSpan({ cls: "ghs-chip-icon" }), "users");
+    teamBtn.createSpan({ cls: "ghs-mode-toggle-text", text: t.addSubTeamMode });
+    teamBtn.createSpan({ cls: "ghs-switch" }).createSpan({ cls: "ghs-switch-thumb" });
     // eslint-disable-next-line obsidianmd/ui/sentence-case -- "main" is a branch name, not UI prose
     const branchInput = branchWrap.createEl("input", { attr: { placeholder: "main" } });
     branchInput.value = "main";
@@ -113,6 +114,7 @@ export class AddSubmoduleModal extends Modal {
     teamBtn.onclick = () => {
       this.isTeamMode = !this.isTeamMode;
       teamBtn.toggleClass("active", this.isTeamMode);
+      teamBtn.setAttribute("aria-checked", String(this.isTeamMode));
       upWrap.toggleClass("ghs-hidden", !this.isTeamMode);
       if (this.isTeamMode) {
         if (!this.upstreamEdited) {
