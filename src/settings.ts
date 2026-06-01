@@ -1,8 +1,8 @@
-import { App, Modal, Notice, PluginSettingTab, Setting, requestUrl, setIcon } from "obsidian";
+import { App, Modal, Notice, PluginSettingTab, Setting, TextComponent, requestUrl, setIcon } from "obsidian";
 import type GitHubSyncPlugin from "./main";
 import type { SyncHistoryEntry } from "./types";
 import { L, setLang, tf, type Lang } from "./i18n";
-import { checkRepoAccess, type GitHubUser } from "./git/githubApi";
+import { checkRepoAccess, fetchRepoDefaultBranch, type GitHubUser } from "./git/githubApi";
 import { AddSubmoduleModal } from "./ui/AddSubmoduleModal";
 import { AIProviderSetupModal } from "./ui/AIProviderSetupModal";
 import { EditSubmoduleModal } from "./ui/EditSubmoduleModal";
@@ -309,6 +309,34 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
 
     const s = this.plugin.settings;
 
+    // Forward reference to the branch field so the URL field can auto-fill
+    // it. Assigned below when the branch Setting is built.
+    let branchInput: TextComponent | null = null;
+    // Track manual edits — once the user types their own branch, their
+    // intent wins and we stop overwriting it with the detected default.
+    let branchUserEdited = !!s.mainRepoBranch && s.mainRepoBranch !== "main";
+
+    // Debounced default-branch detection: after the URL changes to something
+    // valid, ask GitHub for the repo's actual default branch (main, master,
+    // develop, …) and pre-fill the Branch field — guessing wrong causes a
+    // cryptic "src refspec does not match" on first push.
+    let detectTimer: number | null = null;
+    let lastDetectedUrl = "";
+    const detectDefaultBranch = (url: string): void => {
+      if (detectTimer !== null) window.clearTimeout(detectTimer);
+      detectTimer = window.setTimeout(async () => {
+        if (url === lastDetectedUrl) return;
+        lastDetectedUrl = url;
+        const def = await fetchRepoDefaultBranch(url, this.plugin.settings.githubToken);
+        if (def && !branchUserEdited && branchInput) {
+          // setValue() doesn't fire onChange, so persist explicitly.
+          branchInput.setValue(def);
+          this.plugin.settings.mainRepoBranch = def;
+          await this.plugin.saveSettings();
+        }
+      }, 400);
+    };
+
     // Editable URL field. Persists on each keystroke so the global Save
     // button at the bottom is purely a "close" convenience, not the
     // load-bearing persistence step.
@@ -319,8 +347,10 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
         tx.setPlaceholder(t.repoUrlPlaceholder)
           .setValue(s.mainRepoUrl)
           .onChange(async (v) => {
-            this.plugin.settings.mainRepoUrl = v.trim();
+            const url = v.trim();
+            this.plugin.settings.mainRepoUrl = url;
             await this.plugin.saveSettings();
+            if (url) detectDefaultBranch(url);
           });
         tx.inputEl.addClass("ghs-token-input");
       });
@@ -329,9 +359,11 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
     new Setting(card)
       .setName(t.repoBranchLabel)
       .addText((tx) => {
+        branchInput = tx;
         tx.setPlaceholder(t.repoBranchPlaceholder)
           .setValue(s.mainRepoBranch || "main")
           .onChange(async (v) => {
+            branchUserEdited = true;
             this.plugin.settings.mainRepoBranch = v.trim() || "main";
             await this.plugin.saveSettings();
           });
