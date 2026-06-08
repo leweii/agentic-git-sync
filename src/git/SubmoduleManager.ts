@@ -5,7 +5,8 @@ import type { SubmoduleConfig } from "../settings";
 import type { PendingChanges, SyncProgress } from "../types";
 import { GitManager, GitConflictError } from "./GitManager";
 import type { ProgressFn } from "./GitManager";
-import { ensureRemoteBranch } from "./githubApi";
+import { ensureRemoteBranch, parseOwnerRepo } from "./githubApi";
+import type { TokenProvider } from "../auth/TokenProvider";
 import type { AIProvider } from "../ai/AIProvider";
 import type { EventLog } from "../observability/EventLog";
 import { wrapGitWithLogging } from "./loggedGit";
@@ -24,7 +25,7 @@ export class SubmoduleManager {
     private vaultPath: string,
     private user: string,
     private email: string,
-    private token: string,
+    private tokenProvider: TokenProvider,
     private configDir: string,
     private providers: AIProvider[] = [],
     private eventLog: EventLog | null = null,
@@ -33,9 +34,49 @@ export class SubmoduleManager {
     this.git = eventLog ? wrapGitWithLogging(raw, eventLog, "main") : raw;
   }
 
+  /**
+   * Write a per-owner `insteadOf` rewrite into `git`'s config so a raw
+   * submodule op (clone via parent, branch push in the submodule's own
+   * gitdir) authenticates. Submodule gitdirs have their own config, so the
+   * parent's rewrites don't reach them — this closes that gap explicitly.
+   */
+  private async writeOwnerCred(git: SimpleGit, url: string): Promise<void> {
+    const p = parseOwnerRepo(url);
+    if (!p) return;
+    let token = "";
+    try {
+      token = await this.tokenProvider.getTokenForOwner(p.owner);
+    } catch {
+      return; // no installation / mint failed — let git surface the auth error
+    }
+    if (!token) return;
+    // Clear any stale rewrites for this owner first (rotated tokens leave
+    // distinct, ambiguous config keys), then write the current one.
+    try {
+      const listing = await git.raw([
+        "config", "--local", "--name-only", "--get-regexp", "^url\\..*\\.insteadof$",
+      ]);
+      for (const key of listing.split("\n").map((s) => s.trim()).filter(Boolean)) {
+        if (key.includes(`@github.com/${p.owner}/`)) {
+          await git.raw(["config", "--local", "--remove-section", key.replace(/\.insteadof$/i, "")]).catch(() => {});
+        }
+      }
+    } catch { /* none present */ }
+    const gitUser = this.tokenProvider.gitUser();
+    await git
+      .addConfig(
+        `url.https://${gitUser}:${token}@github.com/${p.owner}/.insteadOf`,
+        `https://github.com/${p.owner}/`,
+      )
+      .catch(() => {});
+  }
+
   // ── Submodule lifecycle ──────────────────────────────────────────
 
   async add(config: SubmoduleConfig): Promise<void> {
+    // The submoduleAdd clone runs as a subprocess that reads the parent's
+    // config — make sure the owner's rewrite is present first.
+    await this.writeOwnerCred(this.git, config.remoteUrl);
     await this.git.submoduleAdd(config.remoteUrl, config.localPath);
     await this.git.submoduleUpdate(["--init", config.localPath]);
     await this.alignSubmoduleToBranch(config);
@@ -70,13 +111,23 @@ export class SubmoduleManager {
       return;
     }
 
-    if (this.token) {
+    const ownerParsed = parseOwnerRepo(config.remoteUrl);
+    let subToken = "";
+    if (ownerParsed) {
       try {
-        await ensureRemoteBranch(config.remoteUrl, config.branch, this.token);
+        subToken = await this.tokenProvider.getTokenForOwner(ownerParsed.owner);
+      } catch { /* no installation — handled below */ }
+    }
+    if (subToken) {
+      try {
+        await ensureRemoteBranch(config.remoteUrl, config.branch, subToken);
       } catch (e) {
         console.warn("[agentic-git-sync] ensureRemoteBranch (submodule) failed:", (e as Error).message);
       }
     }
+
+    // Ensure the submodule's own gitdir can authenticate the branch push.
+    await this.writeOwnerCred(subGit, config.remoteUrl);
 
     // Try to track the (now-)existing remote branch; fall back to
     // creating a fresh local branch off the current HEAD.
@@ -530,7 +581,7 @@ export class SubmoduleManager {
         `${this.vaultPath}/${config.localPath}`,
         this.user,
         this.email,
-        this.token,
+        this.tokenProvider,
         this.configDir,
         this.providers,
         this.eventLog,

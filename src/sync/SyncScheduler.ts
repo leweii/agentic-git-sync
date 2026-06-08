@@ -41,6 +41,8 @@ export class SyncScheduler {
     private submoduleManager: SubmoduleManager,
     private getSettings: () => GitHubSyncSettings,
     private eventLog: EventLog | null = null,
+    /** Resolve a REST token for a repo URL's owner via the active auth method. */
+    private tokenForUrl: (url: string) => Promise<string> = () => Promise.resolve(""),
   ) {}
 
   setAutoResolver(cb: AutoResolveCallback | null): void {
@@ -139,7 +141,7 @@ export class SyncScheduler {
       // seed it via the Contents API so the upcoming pull/push has a
       // default branch to talk to. No-op for non-empty remotes; cost is
       // a single cheap API request.
-      await ensureRemoteHasCommits(settings.mainRepoUrl, settings.githubToken);
+      await ensureRemoteHasCommits(settings.mainRepoUrl, await this.tokenForUrl(settings.mainRepoUrl));
 
       const count = await this.gitManager.sync({
         branch,
@@ -200,7 +202,7 @@ export class SyncScheduler {
       // Same defensive auto-init as runVault — covers the case where the
       // user added a submodule via an older plugin version (no auto-init),
       // or recreated the remote on github.com between runs.
-      await ensureRemoteHasCommits(sub.remoteUrl, this.getSettings().githubToken);
+      await ensureRemoteHasCommits(sub.remoteUrl, await this.tokenForUrl(sub.remoteUrl));
 
       const count = await this.submoduleManager.syncOne(sub, (p) => this.emit(id, p));
       this.blockedRepos.delete(id);

@@ -496,6 +496,17 @@
   flex: 1;
 }
 
+.ghs-url-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.ghs-url-row input {
+  flex: 1;
+  width: auto;
+}
+
 .ghs-eye-btn {
   flex-shrink: 0;
   padding: 6px 8px;
@@ -513,6 +524,122 @@
 
 .ghs-wizard-badge-row {
   margin-bottom: 8px;
+}
+
+/* ── Auth option cards (A / B choice in credentials step) ──── */
+
+.ghs-auth-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.ghs-auth-option {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ghs-auth-option.is-primary {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+}
+
+.ghs-auth-option.is-connected {
+  border-color: var(--color-green);
+  background: color-mix(in srgb, var(--color-green) 7%, transparent);
+}
+
+.ghs-auth-option-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ghs-auth-option-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: var(--font-ui-medium);
+}
+
+.ghs-auth-option-letter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: var(--text-on-accent);
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.ghs-auth-option.is-connected .ghs-auth-option-letter {
+  background: var(--color-green);
+}
+
+.ghs-auth-option-letter--b {
+  background: var(--text-muted);
+}
+
+.ghs-auth-recommended {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: var(--text-on-accent);
+}
+
+.ghs-auth-connected-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-ui-smaller);
+  font-weight: 500;
+  color: var(--color-green);
+}
+
+.ghs-auth-connected-badge .svg-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.ghs-auth-option-desc {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.ghs-auth-or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.ghs-auth-or::before,
+.ghs-auth-or::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--background-modifier-border);
 }
 
 .ghs-wizard-field .ghs-hint,
@@ -2900,6 +3027,93 @@
 /* Token input gets a comfortable minimum width */
 .ghs-token-input {
   min-width: 320px;
+}
+
+/* ── GitHub App connection banner ───────────────────────────────── */
+
+/* ── Auth method tab bar ─────────────────────────────────────── */
+.ghs-settings .ghs-auth-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--background-secondary);
+  border-radius: 8px;
+  margin: 4px 0 8px;
+}
+
+.ghs-settings .ghs-auth-tab {
+  flex: 1;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.88em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.ghs-settings .ghs-auth-tab:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.ghs-settings .ghs-auth-tab.is-active {
+  background: var(--background-primary);
+  color: var(--text-normal);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+}
+
+.ghs-settings .ghs-auth-tab-content {
+  margin-bottom: 4px;
+}
+
+/* ── GitHub App banner ───────────────────────────────────────── */
+.ghs-settings .ghs-app-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  margin-bottom: 2px;
+}
+
+.ghs-settings .ghs-app-banner-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ghs-settings .ghs-app-banner-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: var(--font-ui-medium);
+}
+
+.ghs-settings .ghs-app-banner-title .svg-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.ghs-settings .ghs-app-banner-desc {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.ghs-settings .ghs-app-banner-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 /* ── Unified key/token field box ─────────────────────────────────

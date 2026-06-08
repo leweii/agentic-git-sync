@@ -5,6 +5,8 @@ import type { AIProvider } from "../ai/AIProvider";
 import { GitErrorAgent } from "./GitErrorAgent";
 import type { EventLog } from "../observability/EventLog";
 import { wrapGitWithLogging } from "./loggedGit";
+import { parseOwnerRepo } from "./githubApi";
+import type { TokenProvider } from "../auth/TokenProvider";
 
 // Direct `fs` use in this file is intentional and unavoidable. Every
 // path passed to `fs` is rooted at `this.vaultPath` and addresses either
@@ -73,8 +75,10 @@ export class GitManager {
 
   private user: string;
   private email: string;
-  private token: string;
+  private tokenProvider: TokenProvider;
   private configDir: string;
+  /** Epoch ms of the last insteadOf rewrite — throttles redundant refreshes. */
+  private credentialsAt = 0;
   private errorAgent: GitErrorAgent;
   private eventLog: EventLog | null;
   /**
@@ -95,7 +99,7 @@ export class GitManager {
     vaultPath: string,
     user: string,
     email: string,
-    token: string,
+    tokenProvider: TokenProvider,
     configDir: string,
     providers: AIProvider[] = [],
     eventLog: EventLog | null = null,
@@ -105,33 +109,24 @@ export class GitManager {
     this.vaultPath = vaultPath;
     this.user = user;
     this.email = email;
-    this.token = token;
+    this.tokenProvider = tokenProvider;
     this.configDir = configDir;
     this.eventLog = eventLog;
     const rawGit = simpleGit(vaultPath);
     this.git = eventLog ? wrapGitWithLogging(rawGit, eventLog, repoId) : rawGit;
     this.errorAgent = new GitErrorAgent(this.git, vaultPath, providers, eventLog, repoId);
-    this.ready = this.configureGit().catch(() => { /* configureGit is best-effort */ });
+    this.ready = this.configureBasics().catch(() => { /* best-effort */ });
   }
 
-  private async configureGit() {
+  /**
+   * Identity + HTTP tuning — run once at construction. Credentials are
+   * written separately (ensureCredentials) because App tokens are
+   * short-lived and per-owner, so they must be refreshed before remote
+   * operations rather than baked in once.
+   */
+  private async configureBasics() {
     if (this.user) await this.git.addConfig("user.name", this.user).catch(() => {});
     if (this.email) await this.git.addConfig("user.email", this.email).catch(() => {});
-    // The credential-rewrite key embeds the token itself, so a rotated
-    // token becomes a *different* config key and the old rule lingers.
-    // Multiple insteadOf rules for the same https://github.com/ target
-    // are ambiguous: git may pick a stale/revoked token and fail real
-    // git ops with "Invalid username or token" even though the current
-    // token is valid (the API check, which reads the token directly,
-    // still passes — a confusing split-brain). Purge every prior rule
-    // so exactly one is ever active.
-    await this.clearCredentialRewrites();
-    if (this.token) {
-      await this.git.addConfig(
-        "url.https://oauth2:" + this.token + "@github.com/.insteadOf",
-        "https://github.com/"
-      ).catch(() => {});
-    }
     // Large-push tuning. Default postBuffer (1 MB) makes git break the
     // request into chunks that need to be re-sent on any hiccup; large
     // vaults hit "RPC failed; HTTP 408" / "Broken pipe" / "Connection
@@ -153,6 +148,75 @@ export class GitManager {
     // own messages — the raw hint is just noise that confuses non-technical
     // users who never invoked git directly.
     await this.git.addConfig("advice.addIgnoredFile", "false").catch(() => {});
+  }
+
+  /**
+   * Gate every remote operation: ensure basics are configured and fresh
+   * per-owner credentials are written. Call this (instead of `await
+   * this.ready`) before anything that may touch the remote.
+   */
+  private async prepare(): Promise<void> {
+    await this.ready;
+    await this.ensureCredentials();
+  }
+
+  /**
+   * Write one `insteadOf` rewrite per GitHub owner this repo references
+   * (its own remotes + any `.gitmodules` URLs), each embedding a fresh
+   * token from the provider. git picks the longest-prefix match, so a
+   * parent repo can carry distinct tokens for submodules in different
+   * orgs (DESIGN.md §6A / §9.3).
+   *
+   * Throttled to once per 30s: within a single sync the token is stable
+   * (the provider only mints a new one near expiry), so repeated rewrites
+   * are wasted work. Pass `extraUrls` to cover a URL not yet wired as a
+   * remote (e.g. testRemote probing a brand-new repo).
+   */
+  private async ensureCredentials(extraUrls: string[] = [], force = false): Promise<void> {
+    if (!force && extraUrls.length === 0 && Date.now() - this.credentialsAt < 30_000) return;
+    await this.clearCredentialRewrites();
+    const gitUser = this.tokenProvider.gitUser();
+    for (const owner of await this.collectOwners(extraUrls)) {
+      let token = "";
+      try {
+        token = await this.tokenProvider.getTokenForOwner(owner);
+      } catch {
+        // No installation for this owner / mint failed. Skip — git will
+        // surface a clear auth error, and the UI guides installation.
+        continue;
+      }
+      if (!token) continue;
+      await this.git
+        .addConfig(
+          `url.https://${gitUser}:${token}@github.com/${owner}/.insteadOf`,
+          `https://github.com/${owner}/`,
+        )
+        .catch(() => {});
+    }
+    this.credentialsAt = Date.now();
+  }
+
+  /** Distinct GitHub owners referenced by this repo's remotes + submodules. */
+  private async collectOwners(extraUrls: string[] = []): Promise<string[]> {
+    const owners = new Set<string>();
+    const add = (url: string | undefined) => {
+      if (!url) return;
+      const p = parseOwnerRepo(url);
+      if (p) owners.add(p.owner);
+    };
+    for (const u of extraUrls) add(u);
+    try {
+      for (const r of await this.git.getRemotes(true)) add(r.refs.fetch || r.refs.push);
+    } catch { /* no remotes yet */ }
+    try {
+      const gm = await this.git.raw([
+        "config", "-f", ".gitmodules", "--get-regexp", "\\.url$",
+      ]);
+      for (const line of gm.split("\n")) {
+        add(line.trim().split(/\s+/).slice(1).join(" "));
+      }
+    } catch { /* no .gitmodules */ }
+    return [...owners];
   }
 
   /**
@@ -371,14 +435,14 @@ export class GitManager {
    * remote head ref reflects local commits before the API call.
    */
   async pushCurrent(branch: string, onProgress?: ProgressFn): Promise<void> {
-    await this.ready;
+    await this.prepare();
     onProgress?.({ phase: "pushing", message: `Pushing to origin/${branch}` });
     await this.runWithRetry(["push", "--set-upstream", "origin", branch], 3, onProgress);
   }
 
   /** Most recent commit subject on `branch`. Returns "" if unavailable. */
   async lastCommitSubject(branch?: string): Promise<string> {
-    await this.ready;
+    await this.prepare();
     try {
       const ref = branch ? branch : "HEAD";
       const out = await this.git.raw(["log", "-1", "--format=%s", ref]);
@@ -413,7 +477,7 @@ export class GitManager {
     totalAdditions: number;
     totalDeletions: number;
   }> {
-    await this.ready;
+    await this.prepare();
     const maxLinesPerFile = opts.maxLinesPerFile ?? 40;
     const maxFiles = opts.maxFiles ?? 50;
 
@@ -535,7 +599,7 @@ export class GitManager {
     base: string,
     opts: { maxCommits?: number; maxStatChars?: number } = {},
   ): Promise<{ commits: string[]; diffStat: string }> {
-    await this.ready;
+    await this.prepare();
     const maxCommits = opts.maxCommits ?? 20;
     const maxStatChars = opts.maxStatChars ?? 4000;
 
@@ -566,7 +630,7 @@ export class GitManager {
   }
 
   async pull(branch = "main", onProgress?: ProgressFn): Promise<void> {
-    await this.ready;
+    await this.prepare();
     onProgress?.({ phase: "pulling", message: `Pulling origin/${branch}` });
     try {
       await this.git.pull("origin", branch, { "--rebase": "false" });
@@ -679,7 +743,7 @@ export class GitManager {
     ignore: string[] = [],
     onProgress?: ProgressFn
   ): Promise<number> {
-    await this.ready;
+    await this.prepare();
     const committed = await this.stageAndCommit(message, ignore, onProgress);
     if (committed === 0) return 0;
     onProgress?.({ phase: "pushing", message: `Pushing to origin/${branch}` });
@@ -693,7 +757,7 @@ export class GitManager {
     message: string,
     onProgress?: ProgressFn
   ): Promise<number> {
-    await this.ready;
+    await this.prepare();
     const status = await this.git.status();
     const stagedCount = status.staged.length;
     onProgress?.({ phase: "committing", message: "Committing merge" });
@@ -802,6 +866,8 @@ export class GitManager {
    */
   async testRemote(remoteUrl: string): Promise<{ ok: boolean; message?: string }> {
     await this.ready;
+    // The probed URL may not be wired as `origin` yet — force creds for its owner.
+    await this.ensureCredentials([remoteUrl], true);
     try {
       await this.git.raw(["ls-remote", "--exit-code", "--heads", remoteUrl]);
       return { ok: true };
@@ -832,9 +898,10 @@ export class GitManager {
     // If a previous run crashed mid-init, a stale lock can block this one.
     this.clearStaleIndexLock();
     await this.git.init();
-    await this.configureGit();
+    await this.configureBasics();
     await this.git.raw(["checkout", "-b", branch]).catch(() => {});
     await this.git.addRemote("origin", remoteUrl).catch(() => {});
+    await this.ensureCredentials([], true);
     this.ensureGitignore();
   }
 
@@ -869,7 +936,7 @@ export class GitManager {
    * to the ConflictModal for the user to resolve.
    */
   async sync(opts: SyncOptions & { remoteUrl?: string } = {}): Promise<number> {
-    await this.ready;
+    await this.prepare();
     const branch = opts.branch ?? "main";
     const MAX_RECOVERY_ATTEMPTS = 2;
 
@@ -1032,7 +1099,7 @@ export class GitManager {
     onProgress?: ProgressFn,
     autoTakeTheirs = false,
   ): Promise<number> {
-    await this.ready;
+    await this.prepare();
     const current = await this.git.revparse(["--abbrev-ref", "HEAD"]).then((s) => s.trim()).catch(() => "");
     if (!sourceBranch || sourceBranch === current) return 0;
 

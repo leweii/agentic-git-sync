@@ -103,7 +103,7 @@ export class SwitchBranchModal extends Modal {
       const result = await ensureRemoteBranch(
         remoteUrl,
         branch,
-        this.plugin.settings.githubToken,
+        await this.plugin.tokenForUrl(remoteUrl),
       );
 
       this.plugin.settings.mainRepoBranch = branch;

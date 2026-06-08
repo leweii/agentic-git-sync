@@ -63,8 +63,13 @@ function makeRemoteWithCommit(fileName = "README.md", content = "# README"): str
   return bare;
 }
 
+const STUB_PROVIDER = {
+  getTokenForOwner: () => Promise.resolve(""),
+  gitUser: () => "oauth2" as const,
+};
+
 function makeGM(vaultPath: string): GitManager {
-  return new GitManager(vaultPath, "Test", "test@test.com", "", ".obsidian");
+  return new GitManager(vaultPath, "Test", "test@test.com", STUB_PROVIDER, ".obsidian");
 }
 
 function findResiduals(dir: string): string[] {

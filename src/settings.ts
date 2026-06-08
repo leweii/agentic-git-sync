@@ -4,6 +4,7 @@ import type { SyncHistoryEntry } from "./types";
 import { L, setLang, tf, type Lang } from "./i18n";
 import { checkRepoAccess, fetchRepoDefaultBranch, type GitHubUser } from "./git/githubApi";
 import { AddSubmoduleModal } from "./ui/AddSubmoduleModal";
+import { RepoPickerModal } from "./ui/RepoPickerModal";
 import { AIProviderSetupModal } from "./ui/AIProviderSetupModal";
 import { EditSubmoduleModal } from "./ui/EditSubmoduleModal";
 import { SetupWizard } from "./ui/SetupWizard";
@@ -63,6 +64,31 @@ export interface AISettings {
  */
 export type UsageMode = "personal" | "team";
 
+/** How the plugin authenticates to GitHub. */
+export type AuthMethod = "githubApp" | "pat";
+
+/** One installation of the Agentic Git Sync GitHub App (an account the app is on). */
+export interface GitHubAppInstallation {
+  id: number;
+  accountLogin: string;
+  accountType: "User" | "Organization";
+}
+
+/**
+ * One connected GitHub identity (a backend session). Most users have
+ * exactly one; a second appears only when syncing repos owned by a
+ * different GitHub identity (DESIGN.md §6A, case B).
+ */
+export interface GitHubAppConnection {
+  sessionId: string;
+  login: string;
+  installations: GitHubAppInstallation[];
+}
+
+export interface GitHubAppSettings {
+  connections: GitHubAppConnection[];
+}
+
 export interface GitHubSyncSettings {
   setupComplete: boolean;
   language: Lang;
@@ -71,7 +97,18 @@ export interface GitHubSyncSettings {
   autoSyncInterval: number;
   gitUser: string;
   gitEmail: string;
+  /** Default auth path. PAT is the "advanced/offline" fallback. */
+  authMethod: AuthMethod;
+  /** Personal access token — only used when authMethod === "pat". */
   githubToken: string;
+  /**
+   * Per-device random id (base64url), generated on first connect. Bound
+   * into the backend session so a leaked sessionId alone can't mint
+   * tokens. Local-only (never written to .github-sync.json).
+   */
+  deviceId: string;
+  /** GitHub App connections — local-only (sessionId is a secret). */
+  githubApp: GitHubAppSettings;
   mainRepoUrl: string;
   mainRepoBranch: string;
   submodules: SubmoduleConfig[];
@@ -137,7 +174,13 @@ export const DEFAULT_SETTINGS: GitHubSyncSettings = {
   autoSyncInterval: 30,
   gitUser: "",
   gitEmail: "",
+  // Default to PAT during the App-auth rollout so a fresh install still
+  // works end-to-end; flipped to "githubApp" once the Connect flow + UI
+  // are complete (milestone 3).
+  authMethod: "pat",
   githubToken: "",
+  deviceId: "",
+  githubApp: { connections: [] },
   mainRepoUrl: "",
   mainRepoBranch: "main",
   submodules: [],
@@ -183,8 +226,8 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
     containerEl.addClass("ghs-settings");
 
     this.renderSilentHero(containerEl);
-    this.renderRepository(containerEl);
     this.renderAccount(containerEl);
+    this.renderRepository(containerEl);
     this.renderAI(containerEl);
     this.renderGeneral(containerEl);
     this.renderSaveBar(containerEl);
@@ -353,6 +396,15 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
             if (url) detectDefaultBranch(url);
           });
         tx.inputEl.addClass("ghs-token-input");
+        // Browse repos the GitHub App can access (App mode only).
+        if (this.plugin.settings.authMethod === "githubApp") {
+          this.addRepoBrowseButton(tx.inputEl, async (cloneUrl) => {
+            tx.setValue(cloneUrl);
+            this.plugin.settings.mainRepoUrl = cloneUrl;
+            await this.plugin.saveSettings();
+            detectDefaultBranch(cloneUrl);
+          });
+        }
       });
 
     // Editable branch field.
@@ -523,103 +575,201 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
 
   // ── 2. Account (token + identity) ────────────────────────────
 
+  /**
+   * GitHub App connection UI (Layer 4): a one-click Connect + per-identity
+   * status with Disconnect/Refresh. The PAT row below remains as an
+   * advanced/offline fallback. After authorizing in the browser the deep
+   * link updates settings; the Refresh button re-renders this tab if it
+   * was left open.
+   */
+  /** Append a "browse repos" button right after an input, opening the picker. */
+  private addRepoBrowseButton(
+    inputEl: HTMLInputElement,
+    onPick: (cloneUrl: string) => void | Promise<void>,
+  ): void {
+    const btn = createEl("button", {
+      cls: "ghs-browse-btn clickable-icon",
+      attr: { type: "button", "aria-label": "Browse repositories" },
+    });
+    setIcon(btn, "search");
+    btn.onclick = () =>
+      new RepoPickerModal(this.app, this.plugin, (cloneUrl) => void onPick(cloneUrl)).open();
+    inputEl.insertAdjacentElement("afterend", btn);
+  }
+
+  private renderGitHubAppRow(card: HTMLElement): void {
+    const conns = this.plugin.settings.githubApp?.connections ?? [];
+
+    const banner = card.createDiv("ghs-app-banner");
+    const info = banner.createDiv("ghs-app-banner-info");
+    const titleRow = info.createDiv("ghs-app-banner-title");
+    setIcon(titleRow.createSpan(), "github");
+    titleRow.createSpan({ text: "GitHub App" });
+    info.createDiv({
+      cls: "ghs-app-banner-desc",
+      text: "Recommended — connect once, no token to manage.",
+    });
+
+    const ctrl = banner.createDiv("ghs-app-banner-ctrl");
+    if (conns.length === 0) {
+      const btn = ctrl.createEl("button", {
+        cls: "mod-cta",
+        text: "Connect with GitHub App",
+      });
+      btn.onclick = () => void this.plugin.appAuth.beginConnect();
+    } else {
+      const refreshBtn = ctrl.createEl("button", {
+        cls: "clickable-icon",
+        attr: { type: "button", "aria-label": "Refresh" },
+      });
+      setIcon(refreshBtn, "refresh-cw");
+      refreshBtn.onclick = () => this.display();
+
+      const addBtn = ctrl.createEl("button", { text: "Connect another account" });
+      addBtn.onclick = () => void this.plugin.appAuth.beginConnect();
+    }
+
+    for (const c of conns) {
+      const accounts =
+        c.installations.map((i) => i.accountLogin).join(", ") || "(no installations — open the app's install page)";
+      new Setting(card)
+        .setName(`@${c.login}`)
+        .setDesc(`Access: ${accounts}`)
+        .addExtraButton((b) =>
+          b.setIcon("refresh-cw").setTooltip("Refresh installations").onClick(async () => {
+            try {
+              await this.plugin.appAuth.refreshInstallations(c.login);
+            } catch (e) {
+              new Notice(`Couldn't refresh: ${(e as Error).message}`);
+            }
+            this.display();
+          }),
+        )
+        .addButton((b) =>
+          b.setWarning().setButtonText("Disconnect").onClick(async () => {
+            await this.plugin.appAuth.disconnect(c.login);
+            this.display();
+          }),
+        );
+    }
+  }
+
   private renderAccount(parent: HTMLElement): void {
     const t = L().settings;
     const card = this.sectionHeader(parent, t.sectionAccount);
 
-    let tokenInputEl: HTMLInputElement | null = null;
-    let nameInputEl: HTMLInputElement | null = null;
-    let emailInputEl: HTMLInputElement | null = null;
-    let tokenDebounce: number | null = null;
+    const authMethod = this.plugin.settings.authMethod;
 
-    const testBadge = createDiv("ghs-inline-badge ghs-test-badge");
-    testBadge.addClass("ghs-hidden");
+    // ── Tab bar ────────────────────────────────────────────────
+    const tabBar = card.createDiv("ghs-auth-tabs");
+    const appTab = tabBar.createEl("button", {
+      text: "GitHub App",
+      cls: "ghs-auth-tab" + (authMethod === "githubApp" ? " is-active" : ""),
+      attr: { type: "button" },
+    });
+    const patTab = tabBar.createEl("button", {
+      text: "Personal Access Token",
+      cls: "ghs-auth-tab" + (authMethod === "pat" ? " is-active" : ""),
+      attr: { type: "button" },
+    });
 
-    const renderBadge = (status: "loading" | "success" | "error", login?: string) => {
-      testBadge.empty();
-      testBadge.removeClass("ghs-hidden", "success", "error", "loading");
-      testBadge.addClass(status);
-      if (status === "loading") {
-        setIcon(testBadge.createSpan(), "loader");
-        testBadge.createSpan({ text: " Verifying…" });
-      } else if (status === "success") {
-        setIcon(testBadge.createSpan(), "check-circle-2");
-        testBadge.createSpan({ text: ` Connected as @${login}` });
-      } else {
-        setIcon(testBadge.createSpan(), "x-circle");
-        testBadge.createSpan({ text: " Invalid token — check permissions" });
-      }
+    const switchTo = async (method: AuthMethod) => {
+      this.plugin.settings.authMethod = method;
+      await this.plugin.saveSettings();
+      this.display();
     };
+    appTab.onclick = () => void switchTo("githubApp");
+    patTab.onclick = () => void switchTo("pat");
 
-    const fetchIdentity = async (token: string) => {
-      if (token.length < 10) { testBadge.addClass("ghs-hidden"); return; }
-      renderBadge("loading");
-      try {
-        const res = await requestUrl({
-          url: "https://api.github.com/user",
-          headers: { Authorization: `token ${token}`, "User-Agent": "ObsidianGitHubSync" },
-          throw: false,
-        });
-        if (res.status === 200) {
-          const user = res.json as GitHubUser;
-          renderBadge("success", user.login);
-          if (nameInputEl && !nameInputEl.value && user.name) {
-            nameInputEl.value = user.name;
-            this.plugin.settings.gitUser = user.name;
-          }
-          if (emailInputEl && !emailInputEl.value && user.email) {
-            emailInputEl.value = user.email;
-            this.plugin.settings.gitEmail = user.email;
-          }
-          await this.plugin.saveSettings();
-          this.plugin.reinitGit();
+    // ── Tab content ────────────────────────────────────────────
+    const tabContent = card.createDiv("ghs-auth-tab-content");
+
+    if (authMethod === "githubApp") {
+      this.renderGitHubAppRow(tabContent);
+    } else {
+      let tokenInputEl: HTMLInputElement | null = null;
+      let tokenDebounce: number | null = null;
+
+      const testBadge = tabContent.createDiv("ghs-inline-badge ghs-test-badge ghs-hidden");
+
+      const renderBadge = (status: "loading" | "success" | "error", login?: string) => {
+        testBadge.empty();
+        testBadge.removeClass("ghs-hidden", "success", "error", "loading");
+        testBadge.addClass(status);
+        if (status === "loading") {
+          setIcon(testBadge.createSpan(), "loader");
+          testBadge.createSpan({ text: " Verifying…" });
+        } else if (status === "success") {
+          setIcon(testBadge.createSpan(), "check-circle-2");
+          testBadge.createSpan({ text: ` Connected as @${login}` });
         } else {
-          renderBadge("error");
+          setIcon(testBadge.createSpan(), "x-circle");
+          testBadge.createSpan({ text: " Invalid token — check permissions" });
         }
-      } catch {
-        renderBadge("error");
-      }
-    };
+      };
 
-    const tokenSetting = new Setting(card)
-      .setName(t.tokenLabel)
-      .addExtraButton((b) =>
-        b.setIcon("help-circle").setTooltip(t.tokenHelp).onClick(() => {
-          window.open("https://github.com/settings/personal-access-tokens", "_blank");
-        })
-      )
-      .addExtraButton((b) =>
-        b.setIcon("eye").setTooltip(t.tokenShowHide).onClick(() => {
-          if (!tokenInputEl) return;
-          tokenInputEl.type = tokenInputEl.type === "password" ? "text" : "password";
-        })
-      )
-      .addText((text) => {
-        tokenInputEl = text.inputEl;
-        text.inputEl.type = "password";
-        text
-          .setPlaceholder(t.tokenPlaceholder)
-          .setValue(this.plugin.settings.githubToken)
-          .onChange(async (v) => {
-            this.plugin.settings.githubToken = v;
+      const fetchIdentity = async (token: string) => {
+        if (token.length < 10) { testBadge.addClass("ghs-hidden"); return; }
+        renderBadge("loading");
+        try {
+          const res = await requestUrl({
+            url: "https://api.github.com/user",
+            headers: { Authorization: `token ${token}`, "User-Agent": "ObsidianGitHubSync" },
+            throw: false,
+          });
+          if (res.status === 200) {
+            const user = res.json as GitHubUser;
+            renderBadge("success", user.login);
             await this.plugin.saveSettings();
             this.plugin.reinitGit();
-            if (tokenDebounce) window.clearTimeout(tokenDebounce);
-            tokenDebounce = window.setTimeout(() => { void fetchIdentity(v.trim()); }, 600);
-          });
-      })
-      .addExtraButton((b) =>
-        b.setIcon("plug-zap")
-          .setTooltip(L().common.test)
-          .onClick(() => this.testConnection(testBadge))
-      );
-    tokenSetting.settingEl.addClass("ghs-key-row");
-    card.appendChild(testBadge);
+          } else {
+            renderBadge("error");
+          }
+        } catch {
+          renderBadge("error");
+        }
+      };
 
+      const tokenSetting = new Setting(tabContent)
+        .setName(t.tokenLabel)
+        .addExtraButton((b) =>
+          b.setIcon("help-circle").setTooltip(t.tokenHelp).onClick(() => {
+            window.open("https://github.com/settings/personal-access-tokens", "_blank");
+          })
+        )
+        .addExtraButton((b) =>
+          b.setIcon("eye").setTooltip(t.tokenShowHide).onClick(() => {
+            if (!tokenInputEl) return;
+            tokenInputEl.type = tokenInputEl.type === "password" ? "text" : "password";
+          })
+        )
+        .addText((text) => {
+          tokenInputEl = text.inputEl;
+          text.inputEl.type = "password";
+          text
+            .setPlaceholder(t.tokenPlaceholder)
+            .setValue(this.plugin.settings.githubToken)
+            .onChange(async (v) => {
+              this.plugin.settings.githubToken = v;
+              await this.plugin.saveSettings();
+              this.plugin.reinitGit();
+              if (tokenDebounce) window.clearTimeout(tokenDebounce);
+              tokenDebounce = window.setTimeout(() => { void fetchIdentity(v.trim()); }, 600);
+            });
+        })
+        .addExtraButton((b) =>
+          b.setIcon("plug-zap")
+            .setTooltip(L().common.test)
+            .onClick(() => this.testConnection(testBadge))
+        );
+      tokenSetting.settingEl.addClass("ghs-key-row");
+      tabContent.appendChild(testBadge);
+    }
+
+    // ── Git identity (needed by both auth methods for commits) ──
     new Setting(card)
       .setName(t.nameLabel)
       .addText((text) => {
-        nameInputEl = text.inputEl;
         text
           .setPlaceholder(t.namePlaceholder)
           .setValue(this.plugin.settings.gitUser)
@@ -633,7 +783,6 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
     new Setting(card)
       .setName(t.emailLabel)
       .addText((text) => {
-        emailInputEl = text.inputEl;
         text
           .setPlaceholder(t.emailPlaceholder)
           .setValue(this.plugin.settings.gitEmail)

@@ -2,6 +2,7 @@ import { App, Modal, Notice, requestUrl, setIcon } from "obsidian";
 import type GitHubSyncPlugin from "../main";
 import { isValidGitHubUrl, normalizeRepoPath } from "../git/SubmoduleManager";
 import { ensureRemoteHasCommits } from "../git/githubApi";
+import { RepoPickerModal } from "./RepoPickerModal";
 import { L, tf } from "../i18n";
 
 export class AddSubmoduleModal extends Modal {
@@ -51,7 +52,21 @@ export class AddSubmoduleModal extends Modal {
     // ── Remote URL ─────────────────────────────────────────────
     const urlWrap = contentEl.createDiv("ghs-wizard-field");
     urlWrap.createEl("label", { text: t.addSubRemoteUrl });
-    const urlInput = urlWrap.createEl("input", { attr: { placeholder: t.addSubRemoteUrlPh } });
+    const urlRow = urlWrap.createDiv("ghs-url-row");
+    const urlInput = urlRow.createEl("input", { attr: { placeholder: t.addSubRemoteUrlPh } });
+    // Browse repos the GitHub App can access (App mode only).
+    if (this.plugin.settings.authMethod === "githubApp") {
+      const browse = urlRow.createEl("button", {
+        cls: "ghs-browse-btn clickable-icon",
+        attr: { type: "button", "aria-label": "Browse repositories" },
+      });
+      setIcon(browse, "search");
+      browse.onclick = () =>
+        new RepoPickerModal(this.app, this.plugin, (cloneUrl) => {
+          urlInput.value = cloneUrl;
+          urlInput.dispatchEvent(new Event("input"));
+        }).open();
+    }
     const urlBadge = urlWrap.createDiv("ghs-inline-badge");
     urlBadge.addClass("ghs-hidden");
     urlInput.oninput = () => {
@@ -156,7 +171,7 @@ export class AddSubmoduleModal extends Modal {
 
   private async probeRemote(badge: HTMLElement): Promise<void> {
     const t = L().settings;
-    const token = this.plugin.settings.githubToken;
+    const token = await this.plugin.tokenForUrl(this.remoteUrl);
     const match = this.remoteUrl.match(/github\.com[:/]([\w.-]+)\/([\w.-]+?)(\.git)?\/?$/);
     if (!match) {
       this.remoteStatus = "invalid";
@@ -277,7 +292,7 @@ export class AddSubmoduleModal extends Modal {
     try {
       if (this.remoteIsEmpty) {
         if (this.submitBtn) this.submitBtn.textContent = t.addSubPreparing;
-        await ensureRemoteHasCommits(this.remoteUrl, this.plugin.settings.githubToken);
+        await ensureRemoteHasCommits(this.remoteUrl, await this.plugin.tokenForUrl(this.remoteUrl));
         this.remoteIsEmpty = false;
       }
       await this.plugin.addSubmodule(config);
@@ -291,7 +306,7 @@ export class AddSubmoduleModal extends Modal {
       ) {
         try {
           if (this.submitBtn) this.submitBtn.textContent = t.addSubPreparing;
-          await ensureRemoteHasCommits(this.remoteUrl, this.plugin.settings.githubToken);
+          await ensureRemoteHasCommits(this.remoteUrl, await this.plugin.tokenForUrl(this.remoteUrl));
           await this.plugin.addSubmodule(config);
           new Notice(tf(t.addSubAdded, this.localPath));
           this.close();

@@ -11,6 +11,77 @@ export function parseOwnerRepo(url: string): { owner: string; repo: string } | n
   return { owner: m[1], repo: m[2] };
 }
 
+/**
+ * List all repositories visible to a PAT via `GET /user/repos`, paginated.
+ * Returns repos grouped by owner login — the same shape as
+ * `AppAuth.listAccessibleRepos()` so `RepoPickerModal` can use either source.
+ *
+ * Stops fetching on the first non-200 page and returns whatever was gathered.
+ * Best-effort: network errors surface as an empty list.
+ */
+export async function listUserRepos(
+  token: string,
+): Promise<Array<{ login: string; repos: string[] }>> {
+  if (!token) return [];
+  const byLogin = new Map<string, string[]>();
+  for (let page = 1; page <= 20; page++) {
+    const res = await requestUrl({
+      url: `https://api.github.com/user/repos?per_page=100&page=${page}&sort=updated`,
+      headers: {
+        Authorization: `token ${token}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "ObsidianGitHubSync",
+      },
+      throw: false,
+    }).catch(() => null);
+    if (!res || res.status !== 200) break;
+    const repos = res.json as { full_name?: string }[] | null;
+    if (!Array.isArray(repos) || repos.length === 0) break;
+    for (const r of repos) {
+      if (!r.full_name) continue;
+      const slash = r.full_name.indexOf("/");
+      if (slash < 0) continue;
+      const login = r.full_name.slice(0, slash);
+      const existing = byLogin.get(login);
+      if (existing) existing.push(r.full_name);
+      else byLogin.set(login, [r.full_name]);
+    }
+    if (repos.length < 100) break;
+  }
+  return Array.from(byLogin.entries()).map(([login, repos]) => ({ login, repos }));
+}
+
+/**
+ * List the repositories an installation token can access
+ * (`GET /installation/repositories`, paginated). Used to populate the
+ * repo picker — the plugin holds the installation token, so this hits
+ * GitHub directly with no extra backend endpoint.
+ *
+ * Returns full names ("owner/repo"). Best-effort: stops on the first
+ * non-200 and returns whatever it gathered.
+ */
+export async function listInstallationRepos(token: string): Promise<string[]> {
+  if (!token) return [];
+  const names: string[] = [];
+  for (let page = 1; page <= 20; page++) {
+    const res = await requestUrl({
+      url: `https://api.github.com/installation/repositories?per_page=100&page=${page}`,
+      headers: {
+        Authorization: `token ${token}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "ObsidianGitHubSync",
+      },
+      throw: false,
+    }).catch(() => null);
+    if (!res || res.status !== 200) break;
+    const body = res.json as { repositories?: { full_name?: string }[] } | null;
+    const repos = body?.repositories ?? [];
+    for (const r of repos) if (r.full_name) names.push(r.full_name);
+    if (repos.length < 100) break;
+  }
+  return names;
+}
+
 export interface RepoAccessCheck {
   ok: boolean;
   // populated when ok === true

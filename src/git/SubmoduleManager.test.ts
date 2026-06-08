@@ -57,8 +57,13 @@ function submoduleGitDir(vaultPath: string, subPath: string): string {
   return path.resolve(path.dirname(gitfile), ref);
 }
 
+const STUB_PROVIDER = {
+  getTokenForOwner: () => Promise.resolve(""),
+  gitUser: () => "oauth2" as const,
+};
+
 function makeSM(vaultPath: string): SubmoduleManager {
-  return new SubmoduleManager(vaultPath, "Test", "test@test.com", "", ".obsidian");
+  return new SubmoduleManager(vaultPath, "Test", "test@test.com", STUB_PROVIDER, ".obsidian");
 }
 
 // ---------------------------------------------------------------------------
@@ -306,13 +311,13 @@ describe("SubmoduleManager.ensureInitialized()", () => {
   });
 
   it("ensureInitialized() returns the newly-initialized paths", async () => {
-    const sm = new SubmoduleManager(freshClone, "T", "t@t.com", "", ".obsidian");
+    const sm = new SubmoduleManager(freshClone, "T", "t@t.com", STUB_PROVIDER, ".obsidian");
     const newly = await sm.ensureInitialized([config]);
     expect(newly).toEqual(["sub"]);
   });
 
   it("after ensureInitialized() the submodule has its content", async () => {
-    const sm = new SubmoduleManager(freshClone, "T", "t@t.com", "", ".obsidian");
+    const sm = new SubmoduleManager(freshClone, "T", "t@t.com", STUB_PROVIDER, ".obsidian");
     await sm.ensureInitialized([config]);
     expect(exists(freshClone, "sub", "data.md")).toBe(true);
     expect(fs.readFileSync(path.join(freshClone, "sub", "data.md"), "utf8")).toBe(
@@ -321,28 +326,28 @@ describe("SubmoduleManager.ensureInitialized()", () => {
   });
 
   it("ensureInitialized() is idempotent — second call returns []", async () => {
-    const sm = new SubmoduleManager(freshClone, "T", "t@t.com", "", ".obsidian");
+    const sm = new SubmoduleManager(freshClone, "T", "t@t.com", STUB_PROVIDER, ".obsidian");
     await sm.ensureInitialized([config]);
     const newly = await sm.ensureInitialized([config]);
     expect(newly).toEqual([]);
   });
 
   it("ensureInitialized() returns [] when configs is empty", async () => {
-    const sm = new SubmoduleManager(freshClone, "T", "t@t.com", "", ".obsidian");
+    const sm = new SubmoduleManager(freshClone, "T", "t@t.com", STUB_PROVIDER, ".obsidian");
     const newly = await sm.ensureInitialized([]);
     expect(newly).toEqual([]);
   });
 
   it("ensureInitialized() returns [] when vault is not a git repo", async () => {
     const notARepo = tmp();
-    const sm = new SubmoduleManager(notARepo, "T", "t@t.com", "", ".obsidian");
+    const sm = new SubmoduleManager(notARepo, "T", "t@t.com", STUB_PROVIDER, ".obsidian");
     const newly = await sm.ensureInitialized([config]);
     expect(newly).toEqual([]);
     rm(notARepo);
   });
 
   it("after ensureInitialized() listChanges() works for the newly cloned sub", async () => {
-    const sm = new SubmoduleManager(freshClone, "T", "t@t.com", "", ".obsidian");
+    const sm = new SubmoduleManager(freshClone, "T", "t@t.com", STUB_PROVIDER, ".obsidian");
     await sm.ensureInitialized([config]);
     const changes = await sm.listChanges(config);
     expect(changes.total).toBe(0);

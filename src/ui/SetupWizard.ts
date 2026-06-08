@@ -3,6 +3,7 @@ import type GitHubSyncPlugin from "../main";
 import { isValidGitHubUrl } from "../git/SubmoduleManager";
 import { ensureRemoteHasCommits, fetchRepoDefaultBranch, type GitHubUser } from "../git/githubApi";
 import { L } from "../i18n";
+import { RepoPickerModal } from "./RepoPickerModal";
 
 interface WizardState {
   githubToken: string;
@@ -137,11 +138,51 @@ export class SetupWizard extends Modal {
     hero.createEl("h2", { text: w.credTitle });
     hero.createEl("p", { text: w.credDesc });
 
-    // Token field with show/hide toggle + help link
-    const tokenWrap = contentEl.createDiv("ghs-wizard-field");
-    const labelRow = tokenWrap.createDiv("ghs-wizard-label-row");
-    labelRow.createEl("label", { text: w.tokenLabel });
-    const helpBtn = labelRow.createEl("button", {
+    const options = contentEl.createDiv("ghs-auth-options");
+
+    // ── Option A: GitHub App ──────────────────────────────────
+    const appConns = this.plugin.settings.githubApp?.connections ?? [];
+    const isAppConnected = appConns.length > 0;
+
+    const optA = options.createDiv(
+      "ghs-auth-option" + (isAppConnected ? " is-connected" : " is-primary"),
+    );
+    const optAHead = optA.createDiv("ghs-auth-option-header");
+    const optALabel = optAHead.createDiv("ghs-auth-option-label");
+    optALabel.createSpan({ cls: "ghs-auth-option-letter", text: "A" });
+    optALabel.createSpan({ text: "GitHub App" });
+    if (!isAppConnected) {
+      optAHead.createSpan({ cls: "ghs-auth-recommended", text: "Recommended" });
+    } else {
+      const connBadge = optAHead.createDiv("ghs-auth-connected-badge");
+      setIcon(connBadge.createSpan(), "check-circle");
+      connBadge.createSpan({
+        text: `Connected as @${appConns.map((conn) => conn.login).join(", @")}`,
+      });
+    }
+    optA.createDiv({
+      cls: "ghs-auth-option-desc",
+      text: isAppConnected
+        ? "App connected — fill in your name and email below, then click Next."
+        : "One click. Opens GitHub in your browser, then returns here automatically.",
+    });
+    const appBtn = optA.createEl("button", {
+      cls: "mod-cta",
+      attr: { type: "button" },
+      text: isAppConnected ? "Reconnect" : "Connect with GitHub App →",
+    });
+    appBtn.onclick = () => void this.plugin.appAuth.beginConnect();
+
+    // ── OR divider ────────────────────────────────────────────
+    options.createDiv("ghs-auth-or").createSpan({ text: "OR" });
+
+    // ── Option B: Personal Access Token ──────────────────────
+    const optB = options.createDiv("ghs-auth-option");
+    const optBHead = optB.createDiv("ghs-auth-option-header");
+    const optBLabel = optBHead.createDiv("ghs-auth-option-label");
+    optBLabel.createSpan({ cls: "ghs-auth-option-letter ghs-auth-option-letter--b", text: "B" });
+    optBLabel.createSpan({ text: w.tokenLabel });
+    const helpBtn = optBHead.createEl("button", {
       cls: "ghs-help-btn",
       // eslint-disable-next-line obsidianmd/ui/sentence-case -- pronoun "I" must stay capitalized
       attr: { type: "button", "aria-label": "Where do I get a token?" },
@@ -151,7 +192,8 @@ export class SetupWizard extends Modal {
       e.preventDefault();
       window.open("https://github.com/settings/personal-access-tokens", "_blank");
     };
-    const tokenRow = tokenWrap.createDiv("ghs-wizard-token-row");
+
+    const tokenRow = optB.createDiv("ghs-wizard-token-row");
     const tokenInput = tokenRow.createEl("input", {
       // eslint-disable-next-line obsidianmd/ui/sentence-case -- token prefixes are technical identifiers
       attr: { type: "password", placeholder: "ghp_… or github_pat_…" },
@@ -162,7 +204,7 @@ export class SetupWizard extends Modal {
     eyeBtn.onclick = () => {
       tokenInput.type = tokenInput.type === "password" ? "text" : "password";
     };
-    const hint = tokenWrap.createDiv("ghs-hint");
+    const hint = optB.createDiv("ghs-hint");
     // eslint-disable-next-line obsidianmd/ui/sentence-case -- "repo" is a GitHub scope identifier
     hint.createEl("code", { text: "repo" });
     hint.appendText(" " + w.tokenScope);
@@ -187,7 +229,7 @@ export class SetupWizard extends Modal {
       }
       this.tokenDebounce = window.setTimeout(
         () => { void this.testToken(this.state.githubToken, badge, nameInput, emailInput); },
-        600
+        600,
       );
     };
 
@@ -198,7 +240,10 @@ export class SetupWizard extends Modal {
       this.state.gitUser = nameInput.value.trim();
       this.state.gitEmail = emailInput.value.trim();
 
-      if (!this.state.githubToken) {
+      const appConnected =
+        this.plugin.settings.authMethod === "githubApp" &&
+        (this.plugin.settings.githubApp?.connections ?? []).length > 0;
+      if (!appConnected && !this.state.githubToken) {
         new Notice(w.tokenRequired);
         return;
       }
@@ -214,9 +259,6 @@ export class SetupWizard extends Modal {
       await this.plugin.saveSettings();
       this.plugin.reinitGit();
 
-      // Always advance to the Repo step. If the user already configured
-      // a URL, they can review/edit and click Finish; or click "Skip for
-      // now" to go straight to Done.
       this.goTo(2);
     });
   }
@@ -286,8 +328,24 @@ export class SetupWizard extends Modal {
     hero.createEl("h2", { text: t.repoTitle });
     hero.createEl("p", { text: t.repoDesc });
 
-    const urlInput = this.field(contentEl, t.repoUrlLabel, t.repoUrlPlaceholder);
+    // Build URL row manually so we can append the browse button inline.
+    const urlWrap = contentEl.createDiv("ghs-wizard-field");
+    urlWrap.createEl("label", { text: t.repoUrlLabel });
+    const urlRow = urlWrap.createDiv("ghs-url-row");
+    const urlInput = urlRow.createEl("input", { attr: { type: "text", placeholder: t.repoUrlPlaceholder } });
     urlInput.value = this.state.repoUrl;
+    if (this.plugin.settings.authMethod === "githubApp") {
+      const browse = urlRow.createEl("button", {
+        cls: "ghs-browse-btn clickable-icon",
+        attr: { type: "button", "aria-label": "Browse repositories" },
+      });
+      setIcon(browse, "search");
+      browse.onclick = () =>
+        new RepoPickerModal(this.app, this.plugin, (cloneUrl) => {
+          urlInput.value = cloneUrl;
+          urlInput.dispatchEvent(new Event("input"));
+        }).open();
+    }
 
     const urlBadge = contentEl.createDiv("ghs-wizard-badge-row");
 

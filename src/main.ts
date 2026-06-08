@@ -5,7 +5,7 @@ import { EventLog } from "./observability/EventLog";
 import { GitHubSyncSettings, DEFAULT_SETTINGS, GitHubSyncSettingTab, migrateStaleModels } from "./settings";
 import { GitManager } from "./git/GitManager";
 import { SubmoduleManager } from "./git/SubmoduleManager";
-import { ensureRemoteHasCommits, ensureRemoteBranch, isPushPermissionError, createPullRequest } from "./git/githubApi";
+import { ensureRemoteHasCommits, ensureRemoteBranch, isPushPermissionError, createPullRequest, parseOwnerRepo } from "./git/githubApi";
 import { SyncScheduler } from "./sync/SyncScheduler";
 import { StatusBar } from "./ui/StatusBar";
 import { SyncDashboard, DASHBOARD_VIEW_TYPE } from "./ui/SyncDashboard";
@@ -18,6 +18,8 @@ import { GitNotInstalledModal } from "./ui/GitNotInstalledModal";
 import { L, tf, setLang } from "./i18n";
 import { friendlyError } from "./errors";
 import { VAULT_REPO_ID } from "./types";
+import { AppAuth } from "./auth/AppAuth";
+import { PROTOCOL_ACTION } from "./auth/constants";
 import { AIClient } from "./ai/AIClient";
 import { OpenAIProvider } from "./ai/OpenAIProvider";
 import { GeminiProvider } from "./ai/GeminiProvider";
@@ -43,6 +45,8 @@ export default class GitHubSyncPlugin extends Plugin {
   gitManager: GitManager;
   submoduleManager: SubmoduleManager;
   scheduler: SyncScheduler;
+  /** GitHub App auth: Connect flow, deep-link handling, token provider. */
+  appAuth: AppAuth;
   /** Append-only JSONL log of everything the plugin does — see EventLog. */
   eventLog: EventLog;
   private statusBar: StatusBar;
@@ -81,9 +85,39 @@ export default class GitHubSyncPlugin extends Plugin {
     return adapter.getBasePath();
   }
 
+  /**
+   * A GitHub token valid for `url`'s owner via the active auth method
+   * (App installation token, or the PAT). Returns "" when no installation
+   * / PAT covers the owner — REST helpers degrade gracefully (the git
+   * transport surfaces the actionable auth error, and the UI guides
+   * installing the app on that owner).
+   */
+  async tokenForUrl(url: string): Promise<string> {
+    const owner = parseOwnerRepo(url)?.owner;
+    if (!owner) return "";
+    try {
+      return await this.appAuth.getTokenForOwner(owner);
+    } catch {
+      return "";
+    }
+  }
+
   async onload() {
     await this.loadSettings();
     setLang(this.settings.language ?? "en");
+
+    // GitHub App auth: provider + Connect/deep-link plumbing. Register the
+    // protocol handler early so a callback that arrives during startup
+    // isn't dropped.
+    this.appAuth = new AppAuth(this);
+    this.registerObsidianProtocolHandler(PROTOCOL_ACTION, (params) => {
+      void this.appAuth.handleCallback(params);
+    });
+    this.addCommand({
+      id: "connect-github-app",
+      name: "Connect GitHub App",
+      callback: () => void this.appAuth.beginConnect(),
+    });
 
     const vaultPath = this.getVaultPath();
     this.eventLog = new EventLog(vaultPath);
@@ -102,6 +136,7 @@ export default class GitHubSyncPlugin extends Plugin {
       this.submoduleManager,
       () => this.settings,
       this.eventLog,
+      (url) => this.tokenForUrl(url),
     );
 
     this.scheduler.onStatus((id, progress) => {
@@ -331,7 +366,8 @@ export default class GitHubSyncPlugin extends Plugin {
     // --set-upstream — and even when it works, the regular (non-initial)
     // sync path's pull would fail on "couldn't find remote ref" until
     // the first push lands.
-    await ensureRemoteHasCommits(cleanUrl, this.settings.githubToken);
+    const apiToken = await this.tokenForUrl(cleanUrl);
+    await ensureRemoteHasCommits(cleanUrl, apiToken);
 
     // If the user typed a branch that doesn't exist on the remote yet,
     // materialise it from the repo's default branch via the GitHub API.
@@ -340,7 +376,7 @@ export default class GitHubSyncPlugin extends Plugin {
     // half too, so the user can never get past the first push without
     // either preexisting access or this API-side branch creation.
     try {
-      const r = await ensureRemoteBranch(cleanUrl, cleanBranch, this.settings.githubToken);
+      const r = await ensureRemoteBranch(cleanUrl, cleanBranch, apiToken);
       if (r.created) {
         new Notice(tf(L().notices.branchCreated, cleanBranch, r.defaultBranch ?? "default"));
       }
@@ -453,7 +489,7 @@ export default class GitHubSyncPlugin extends Plugin {
         await ensureRemoteBranch(
           changes.remoteUrl,
           changes.branch,
-          this.settings.githubToken,
+          await this.tokenForUrl(changes.remoteUrl),
         );
       } catch (e) {
         // Non-fatal — the next sync's recovery agent can still handle it.
@@ -509,7 +545,8 @@ export default class GitHubSyncPlugin extends Plugin {
       // Defensive: button shouldn't be shown in this case.
       return;
     }
-    if (!this.settings.githubToken) {
+    const prToken = await this.tokenForUrl(sub.remoteUrl);
+    if (!prToken) {
       new Notice(L().settings.testNoToken, 6000);
       return;
     }
@@ -545,7 +582,7 @@ export default class GitHubSyncPlugin extends Plugin {
         }
         return await createPullRequest({
           remoteUrl: sub.remoteUrl,
-          token: this.settings.githubToken,
+          token: prToken,
           head,
           base,
           title,
@@ -599,11 +636,14 @@ export default class GitHubSyncPlugin extends Plugin {
   private initGit(vaultPath: string): void {
     const configDir = this.app.vault.configDir;
     const providers = this.buildAIProviders();
+    // Pass AppAuth itself — it delegates to the active provider, so a later
+    // Connect (PAT → App) takes effect without rebuilding the managers.
+    const tokenProvider = this.appAuth;
     this.gitManager = new GitManager(
       vaultPath,
       this.settings.gitUser,
       this.settings.gitEmail,
-      this.settings.githubToken,
+      tokenProvider,
       configDir,
       providers,
       this.eventLog,
@@ -613,7 +653,7 @@ export default class GitHubSyncPlugin extends Plugin {
       vaultPath,
       this.settings.gitUser,
       this.settings.gitEmail,
-      this.settings.githubToken,
+      tokenProvider,
       configDir,
       providers,
       this.eventLog,
@@ -649,6 +689,7 @@ export default class GitHubSyncPlugin extends Plugin {
       this.submoduleManager,
       () => this.settings,
       this.eventLog,
+      (url) => this.tokenForUrl(url),
     );
     this.scheduler.onStatus((id, progress) => {
       if (id === VAULT_REPO_ID) this.statusBar.setPhase(progress.phase, progress.message);
