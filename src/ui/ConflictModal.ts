@@ -559,7 +559,6 @@ export class ConflictModal extends Modal {
     };
 
     const hint = pane.createDiv({ cls: "ghs-cv2-edit-hint" });
-    // eslint-disable-next-line obsidianmd/ui/sentence-case -- "Enter" is a key name
     hint.createEl("kbd", { text: "⌘ Enter" });
     hint.appendText(L().conflict.kbdSave);
     hint.createEl("kbd", { text: "Esc" });

@@ -63,7 +63,6 @@ export class SyncDashboard extends ItemView {
   }
 
   getViewType(): string { return DASHBOARD_VIEW_TYPE; }
-  // eslint-disable-next-line obsidianmd/ui/sentence-case -- "Agentic Git Sync" is the proper product name
   getDisplayText(): string { return "Agentic Git Sync"; }
   getIcon(): string { return "github"; }
 
@@ -131,7 +130,6 @@ export class SyncDashboard extends ItemView {
 
     // Header
     const header = root.createDiv("ghs-dashboard-header");
-    // eslint-disable-next-line obsidianmd/ui/sentence-case -- "Agentic Git Sync" is the proper product name
     header.createEl("h4", { text: "Agentic Git Sync" });
     const headerActions = header.createDiv("ghs-dashboard-header-actions");
     const addSubBtn = headerActions.createEl("button", { cls: "ghs-icon-btn", attr: { title: L().settings.addSubTitle } });

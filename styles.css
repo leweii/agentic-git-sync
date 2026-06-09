@@ -889,6 +889,38 @@
   min-height: 0;
 }
 
+/* ── Repo picker modal ───────────────────────────────────────── */
+.ghs-repo-search {
+  width: 100%;
+  margin-bottom: 0.5rem;
+}
+.ghs-repo-picker-list {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.ghs-repo-picker-footer {
+  margin-top: 0.75rem;
+}
+.ghs-repo-picker-install-link {
+  cursor: pointer;
+}
+.ghs-repo-group {
+  font-weight: 600;
+  margin: 0.5rem 0 0.25rem;
+  opacity: 0.7;
+}
+.ghs-repo-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.ghs-repo-row:hover {
+  background: var(--background-modifier-hover);
+}
+
 .ghs-add-sub-btn {
   width: 100%;
   display: flex;

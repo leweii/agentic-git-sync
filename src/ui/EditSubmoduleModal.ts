@@ -71,7 +71,6 @@ export class EditSubmoduleModal extends Modal {
     });
 
     this.formField(body, "Branch", (wrap) => {
-      // eslint-disable-next-line obsidianmd/ui/sentence-case -- "main" is a branch name, not UI prose
       const input = wrap.createEl("input", { attr: { type: "text", placeholder: "main" } });
       input.value = this.branch;
       input.oninput = () => (this.branch = input.value.trim());
@@ -89,7 +88,6 @@ export class EditSubmoduleModal extends Modal {
       // ("work directly on the baseline") so the field is never empty.
       if (!this.upstreamBranch) this.upstreamBranch = this.branch;
       this.formField(body, "Upstream branch", (wrap) => {
-        // eslint-disable-next-line obsidianmd/ui/sentence-case -- "main" is a branch name, not UI prose
         const input = wrap.createEl("input", { attr: { type: "text", placeholder: "main" } });
         input.value = this.upstreamBranch;
         input.oninput = () => (this.upstreamBranch = input.value.trim());

@@ -552,7 +552,7 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
       constructor(app: App, private onConfirm: () => Promise<void>) { super(app); }
       onOpen(): void {
         const { contentEl } = this;
-        contentEl.createEl("h3", { text: `Remove submodule "${label}"?` });
+        new Setting(contentEl).setName(`Remove submodule "${label}"?`).setHeading();
         contentEl.createEl("p", {
           text:
             "This deinitialises the submodule and deletes its working tree from the vault. " +
@@ -812,7 +812,6 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
 
     this.renderAIProviderRow(card, {
       label: t.openaiLabel,
-      // eslint-disable-next-line obsidianmd/ui/sentence-case -- "sk-" is the OpenAI token prefix
       placeholder: "sk-…",
       getToken: () => this.plugin.settings.ai.openaiToken,
       setToken: (v) => { this.plugin.settings.ai.openaiToken = v; },
@@ -825,7 +824,6 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
 
     this.renderAIProviderRow(card, {
       label: t.geminiLabel,
-      // eslint-disable-next-line obsidianmd/ui/sentence-case -- "AIza" is the Gemini key prefix
       placeholder: "AIza…",
       getToken: () => this.plugin.settings.ai.geminiToken,
       setToken: (v) => { this.plugin.settings.ai.geminiToken = v; },
@@ -838,7 +836,6 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
 
     this.renderAIProviderRow(card, {
       label: t.claudeLabel,
-      // eslint-disable-next-line obsidianmd/ui/sentence-case -- "sk-ant-" is the Anthropic key prefix
       placeholder: "sk-ant-…",
       getToken: () => this.plugin.settings.ai.claudeToken,
       setToken: (v) => { this.plugin.settings.ai.claudeToken = v; },
@@ -851,7 +848,6 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
 
     this.renderAIProviderRow(card, {
       label: t.deepseekLabel,
-      // eslint-disable-next-line obsidianmd/ui/sentence-case -- "sk-" is the DeepSeek token prefix
       placeholder: "sk-…",
       getToken: () => this.plugin.settings.ai.deepseekToken,
       setToken: (v) => { this.plugin.settings.ai.deepseekToken = v; },
@@ -1048,7 +1044,7 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
     const modal = new (class extends Modal {
       onOpen(): void {
         const { contentEl } = this;
-        contentEl.createEl("h3", { text: t.resetModalTitle });
+        new Setting(contentEl).setName(t.resetModalTitle).setHeading();
         const intro = contentEl.createEl("p", { cls: "ghs-confirm-desc" });
         intro.createSpan({ text: t.resetModalIntro });
         const list = contentEl.createEl("ul");

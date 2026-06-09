@@ -1,4 +1,4 @@
-import { Plugin, Notice, FileSystemAdapter, setIcon, TFolder } from "obsidian";
+import { Plugin, Notice, FileSystemAdapter, Platform, setIcon, TFolder } from "obsidian";
 import type { TAbstractFile } from "obsidian";
 import { fs, path } from "./node-builtins";
 import { EventLog } from "./observability/EventLog";
@@ -178,7 +178,6 @@ export default class GitHubSyncPlugin extends Plugin {
 
     this.registerView(DASHBOARD_VIEW_TYPE, (leaf) => new SyncDashboard(leaf, this));
 
-    // eslint-disable-next-line obsidianmd/ui/sentence-case -- "Agentic Git Sync" is the proper product name
     this.addRibbonIcon("github", "Agentic Git Sync", () => this.activateDashboard());
 
     this.addCommand({
@@ -986,7 +985,7 @@ export default class GitHubSyncPlugin extends Plugin {
     sections.push(`Time: ${new Date().toISOString()}`);
     sections.push(`Plugin: ${this.manifest.id}@${this.manifest.version}`);
     sections.push(`Obsidian: ${(this.app as unknown as { appVersion?: string }).appVersion ?? "unknown"}`);
-    sections.push(`Platform: ${navigator.platform}`);
+    sections.push(`Platform: ${Platform.isWin ? "Windows" : Platform.isMacOS ? "macOS" : Platform.isLinux ? "Linux" : "unknown"}`);
     sections.push("");
     sections.push("=== Configured submodules ===");
     for (const s of this.settings.submodules) {

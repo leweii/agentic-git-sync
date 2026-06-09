@@ -56,20 +56,14 @@ export class RepoPickerModal extends Modal {
       attr: { type: "text", placeholder: "Search repositories…" },
       cls: "ghs-repo-search",
     });
-    search.style.width = "100%";
-    search.style.marginBottom = "0.5rem";
 
-    const listEl = contentEl.createDiv("ghs-repo-list");
-    listEl.style.maxHeight = "40vh";
-    listEl.style.overflowY = "auto";
+    const listEl = contentEl.createDiv("ghs-repo-picker-list");
     listEl.setText("Loading repositories…");
 
     if (isAppMode) {
-      const footer = contentEl.createDiv("ghs-add-sub");
-      footer.style.marginTop = "0.75rem";
+      const footer = contentEl.createDiv("ghs-repo-picker-footer");
       footer.createSpan({ text: "Don't see it? " });
-      const installLink = footer.createEl("a", { text: "Install the app on another account/org" });
-      installLink.style.cursor = "pointer";
+      const installLink = footer.createEl("a", { cls: "ghs-repo-picker-install-link", text: "Install the app on another account/org" });
       installLink.onclick = () => window.open(installUrl(), "_blank");
     }
 
@@ -82,17 +76,12 @@ export class RepoPickerModal extends Modal {
       for (const g of groups) {
         const matches = g.repos.filter((r) => r.toLowerCase().includes(q));
         if (matches.length === 0) continue;
-        listEl.createEl("div", { text: `@${g.login}`, cls: "ghs-repo-group" }).style.cssText =
-          "font-weight:600;margin:.5rem 0 .25rem;opacity:.7";
+        listEl.createEl("div", { text: `@${g.login}`, cls: "ghs-repo-group" });
         for (const full of matches) {
           shown++;
           const row = listEl.createEl("div", { cls: "ghs-repo-row" });
-          row.style.cssText =
-            "display:flex;align-items:center;gap:.4rem;padding:.35rem .5rem;border-radius:6px;cursor:pointer";
           setIcon(row.createSpan(), "github");
           row.createSpan({ text: full });
-          row.onmouseenter = () => (row.style.background = "var(--background-modifier-hover)");
-          row.onmouseleave = () => (row.style.background = "");
           row.onclick = () => {
             this.onPick(`https://github.com/${full}.git`, full);
             this.close();

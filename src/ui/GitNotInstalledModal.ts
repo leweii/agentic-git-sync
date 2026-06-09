@@ -1,4 +1,4 @@
-import { Modal, App } from "obsidian";
+import { Modal, App, Platform } from "obsidian";
 import { L } from "../i18n";
 
 export class GitNotInstalledModal extends Modal {
@@ -16,9 +16,8 @@ export class GitNotInstalledModal extends Modal {
       text: "Agentic Git Sync requires Git to be installed on your system. It was not found in your PATH.",
     });
 
-    const platform = navigator.platform;
-    const isWin = platform.startsWith("Win");
-    const isMac = platform.startsWith("Mac");
+    const isWin = Platform.isWin;
+    const isMac = Platform.isMacOS;
 
     const stepsEl = contentEl.createDiv();
 

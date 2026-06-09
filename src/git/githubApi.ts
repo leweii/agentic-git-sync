@@ -145,7 +145,7 @@ function classifyToken(token: string): TokenKind {
 // Obsidian's requestUrl() typings expose `status`/`json` as `any`; a full
 // typed-wrapper refactor is deferred. Suppress the unsafe-access rules for
 // this function so the rest of the file keeps strict typing.
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Obsidian requestUrl() types status/json as any; typed wrappers would duplicate the full response shape */
 async function explainNotFound(
   owner: string,
   repo: string,
@@ -185,7 +185,7 @@ async function explainNotFound(
     ? `Can't find ${slug}. Either it doesn't exist yet — create the repo on GitHub first — or it exists but this fine-grained token isn't granted access (fine-grained tokens only see repos explicitly added under "Repository access"). After creating it, add ${slug} to the token and grant Contents: Read and write.`
     : `Can't find ${slug}. Either it doesn't exist yet — create the repo on GitHub first — or it's private and this token${login ? ` (account ${login})` : ""} has no access / is missing the "repo" scope.`;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- end explainNotFound */
 
 /**
  * Probe a GitHub repo URL for access and write permission. Returns a
@@ -440,7 +440,7 @@ interface GitHubPullSummary { html_url?: string; number?: number; head?: { ref?:
  *   - Classic PAT: `repo` scope (covers PR creation)
  *   - Fine-grained PAT: "Pull requests: Read and write" on the target repo
  */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Obsidian requestUrl() types status/json as any; typed wrappers would duplicate the full response shape */
 export async function createPullRequest(
   p: CreatePullRequestParams,
 ): Promise<CreatePullRequestResult> {
@@ -523,13 +523,13 @@ export async function createPullRequest(
   }
   return { ok: false, reason: `GitHub returned ${res.status}` };
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- end createPullRequest */
 
 /**
  * Look up the existing open PR for head → base. Used to surface a useful
  * URL when createPullRequest hits the "already exists" 422 case.
  */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Obsidian requestUrl() types status/json as any; typed wrappers would duplicate the full response shape */
 async function findExistingOpenPr(
   owner: string,
   repo: string,
@@ -553,7 +553,7 @@ async function findExistingOpenPr(
   if (!Array.isArray(list) || list.length === 0) return null;
   return list[0]?.html_url ?? null;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- end findExistingOpenPr */
 
 /**
  * True when a git push failure looks like a *permission* issue on the

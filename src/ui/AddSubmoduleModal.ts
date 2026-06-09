@@ -112,7 +112,6 @@ export class AddSubmoduleModal extends Modal {
     });
     teamBtn.createSpan({ cls: "ghs-mode-toggle-text", text: t.addSubTeamMode });
     teamBtn.createSpan({ cls: "ghs-switch" }).createSpan({ cls: "ghs-switch-thumb" });
-    // eslint-disable-next-line obsidianmd/ui/sentence-case -- "main" is a branch name, not UI prose
     const branchInput = branchWrap.createEl("input", { attr: { placeholder: "main" } });
     branchInput.value = "main";
     branchInput.oninput = () => (this.branch = branchInput.value.trim() || "main");

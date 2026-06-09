@@ -187,7 +187,6 @@ export class SetupWizard extends Modal {
     optBLabel.createSpan({ text: w.tokenLabel });
     const helpBtn = optBHead.createEl("button", {
       cls: "ghs-help-btn",
-      // eslint-disable-next-line obsidianmd/ui/sentence-case -- pronoun "I" must stay capitalized
       attr: { type: "button", "aria-label": "Where do I get a token?" },
     });
     setIcon(helpBtn, "help-circle");
@@ -198,7 +197,6 @@ export class SetupWizard extends Modal {
 
     const tokenRow = optB.createDiv("ghs-wizard-token-row");
     const tokenInput = tokenRow.createEl("input", {
-      // eslint-disable-next-line obsidianmd/ui/sentence-case -- token prefixes are technical identifiers
       attr: { type: "password", placeholder: "ghp_… or github_pat_…" },
     });
     tokenInput.value = this.state.githubToken;
@@ -208,7 +206,6 @@ export class SetupWizard extends Modal {
       tokenInput.type = tokenInput.type === "password" ? "text" : "password";
     };
     const hint = optB.createDiv("ghs-hint");
-    // eslint-disable-next-line obsidianmd/ui/sentence-case -- "repo" is a GitHub scope identifier
     hint.createEl("code", { text: "repo" });
     hint.appendText(" " + w.tokenScope);
 
