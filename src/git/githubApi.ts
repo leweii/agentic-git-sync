@@ -1,4 +1,4 @@
-import { requestUrl } from "obsidian";
+import { requestUrl, type RequestUrlResponse } from "obsidian";
 
 /**
  * Parse owner/repo from any GitHub URL form we accept (https or ssh-style,
@@ -25,16 +25,21 @@ export async function listUserRepos(
   if (!token) return [];
   const byLogin = new Map<string, string[]>();
   for (let page = 1; page <= 20; page++) {
-    const res = await requestUrl({
-      url: `https://api.github.com/user/repos?per_page=100&page=${page}&sort=updated`,
-      headers: {
-        Authorization: `token ${token}`,
-        Accept: "application/vnd.github+json",
-        "User-Agent": "ObsidianGitHubSync",
-      },
-      throw: false,
-    }).catch(() => null);
-    if (!res || res.status !== 200) break;
+    let res: RequestUrlResponse;
+    try {
+      res = await requestUrl({
+        url: `https://api.github.com/user/repos?per_page=100&page=${page}&sort=updated`,
+        headers: {
+          Authorization: `token ${token}`,
+          Accept: "application/vnd.github+json",
+          "User-Agent": "ObsidianGitHubSync",
+        },
+        throw: false,
+      });
+    } catch {
+      break;
+    }
+    if (res.status !== 200) break;
     const repos = res.json as { full_name?: string }[] | null;
     if (!Array.isArray(repos) || repos.length === 0) break;
     for (const r of repos) {
@@ -64,16 +69,21 @@ export async function listInstallationRepos(token: string): Promise<string[]> {
   if (!token) return [];
   const names: string[] = [];
   for (let page = 1; page <= 20; page++) {
-    const res = await requestUrl({
-      url: `https://api.github.com/installation/repositories?per_page=100&page=${page}`,
-      headers: {
-        Authorization: `token ${token}`,
-        Accept: "application/vnd.github+json",
-        "User-Agent": "ObsidianGitHubSync",
-      },
-      throw: false,
-    }).catch(() => null);
-    if (!res || res.status !== 200) break;
+    let res: RequestUrlResponse;
+    try {
+      res = await requestUrl({
+        url: `https://api.github.com/installation/repositories?per_page=100&page=${page}`,
+        headers: {
+          Authorization: `token ${token}`,
+          Accept: "application/vnd.github+json",
+          "User-Agent": "ObsidianGitHubSync",
+        },
+        throw: false,
+      });
+    } catch {
+      break;
+    }
+    if (res.status !== 200) break;
     const body = res.json as { repositories?: { full_name?: string }[] } | null;
     const repos = body?.repositories ?? [];
     for (const r of repos) if (r.full_name) names.push(r.full_name);

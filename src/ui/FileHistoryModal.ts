@@ -275,9 +275,9 @@ export class FileHistoryModal extends Modal {
       this.diffInfoEl.createSpan({ cls: "ghs-fh-diff-author", text: `${newest.authorName} · ${newest.date.toLocaleDateString()}` });
       const copyBtn = this.diffInfoEl.createEl("button", { cls: "ghs-fh-copy-btn", text: L().fileHistory.copyHash });
       copyBtn.onclick = () => {
-        navigator.clipboard.writeText(newest.hash).then(() => {
+        void navigator.clipboard.writeText(newest.hash).then(() => {
           copyBtn.textContent = "✓";
-          setTimeout(() => { copyBtn.textContent = L().fileHistory.copyHash; }, 1500);
+          window.setTimeout(() => { copyBtn.textContent = L().fileHistory.copyHash; }, 1500);
         });
       };
     } else {

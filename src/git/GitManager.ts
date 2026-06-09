@@ -114,7 +114,7 @@ export class GitManager {
     this.eventLog = eventLog;
     const rawGit = simpleGit(vaultPath);
     this.git = eventLog ? wrapGitWithLogging(rawGit, eventLog, repoId) : rawGit;
-    this.errorAgent = new GitErrorAgent(this.git, vaultPath, providers, eventLog, repoId);
+    this.errorAgent = new GitErrorAgent(this.git, vaultPath, providers, eventLog, repoId, configDir);
     this.ready = this.configureBasics().catch(() => { /* best-effort */ });
   }
 

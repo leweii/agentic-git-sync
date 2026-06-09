@@ -33,10 +33,12 @@ export function wrapGitWithLogging(
 ): SimpleGit {
   return new Proxy(git, {
     get(target, prop, receiver) {
-      const original = Reflect.get(target, prop, receiver);
+      const original: unknown = Reflect.get(target, prop, receiver);
       if (typeof original !== "function") return original;
       const name = String(prop);
-      if (SKIP_METHODS.has(name) || name.startsWith("_")) return original.bind(target);
+      if (SKIP_METHODS.has(name) || name.startsWith("_")) {
+        return original.bind(target) as (...args: unknown[]) => unknown;
+      }
 
       return (...args: unknown[]) => {
         const start = Date.now();

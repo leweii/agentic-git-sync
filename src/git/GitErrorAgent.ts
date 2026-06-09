@@ -107,8 +107,10 @@ export class GitErrorAgent {
     providers: AIProvider[] = [],
     private eventLog: EventLog | null = null,
     private repoId = "main",
+    // Vault config dir (e.g. `.obsidian`); forwarded so traces land under it.
+    private configDir = "",
   ) {
-    this.reactAgent = new GitReActAgent(git, vaultPath, providers, eventLog, repoId);
+    this.reactAgent = new GitReActAgent(git, vaultPath, providers, eventLog, repoId, configDir);
   }
 
   /**

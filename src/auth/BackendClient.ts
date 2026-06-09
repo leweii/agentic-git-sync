@@ -3,7 +3,7 @@
  * /disconnect. Maps the backend's { error, message } contract (DESIGN §12)
  * to a typed BackendError so callers can react (e.g. clear a dead session).
  */
-import { requestUrl } from "obsidian";
+import { requestUrl, type RequestUrlResponse } from "obsidian";
 import { BACKEND_BASE } from "./constants";
 import type { GitHubAppInstallation } from "../settings";
 
@@ -45,7 +45,7 @@ async function call<T>(
   const qs = opts.query
     ? "?" + new URLSearchParams(opts.query).toString()
     : "";
-  let res;
+  let res: RequestUrlResponse;
   try {
     res = await requestUrl({
       url: `${BACKEND_BASE}${path}${qs}`,

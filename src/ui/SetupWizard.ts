@@ -364,14 +364,16 @@ export class SetupWizard extends Modal {
     let lastDetectedUrl = "";
     const detectDefaultBranch = (url: string) => {
       if (detectTimer !== null) window.clearTimeout(detectTimer);
-      detectTimer = window.setTimeout(async () => {
-        if (url === lastDetectedUrl) return;
-        lastDetectedUrl = url;
-        const def = await fetchRepoDefaultBranch(url, this.state.githubToken);
-        if (def && !branchUserEdited) {
-          branchInput.value = def;
-          this.state.branch = def;
-        }
+      detectTimer = window.setTimeout(() => {
+        void (async () => {
+          if (url === lastDetectedUrl) return;
+          lastDetectedUrl = url;
+          const def = await fetchRepoDefaultBranch(url, this.state.githubToken);
+          if (def && !branchUserEdited) {
+            branchInput.value = def;
+            this.state.branch = def;
+          }
+        })();
       }, 400);
     };
 

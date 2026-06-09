@@ -126,7 +126,7 @@ function textFromContent(body: ClaudeMessagesResponse | null): string {
   if (!body?.content) return "";
   const parts = body.content
     .filter((c) => c.type === "text" && typeof c.text === "string")
-    .map((c) => c.text as string);
+    .map((c) => c.text);
   return parts.join("");
 }
 

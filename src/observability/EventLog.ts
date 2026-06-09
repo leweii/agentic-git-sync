@@ -36,7 +36,9 @@ export interface BaseEvent {
   [key: string]: unknown;
 }
 
-const LOG_SUBDIR = path.join(".obsidian", "plugins", "agentic-git-sync", "event-log");
+// Relative to the vault's config dir (e.g. `.obsidian`), which the caller
+// passes in — Obsidian lets users rename it, so we never hardcode it.
+const LOG_PLUGIN_SUBDIR = path.join("plugins", "agentic-git-sync", "event-log");
 const RETENTION_DAYS = 7;
 
 // Max characters per arg string in git_op events. Long file content / diffs
@@ -51,9 +53,9 @@ export class EventLog {
   private buffer: BaseEvent[] = [];
   private ready = false;
 
-  constructor(vaultPath: string) {
+  constructor(vaultPath: string, configDir: string) {
     this.session = generateSessionId();
-    this.dir = path.join(vaultPath, LOG_SUBDIR);
+    this.dir = path.join(vaultPath, configDir, LOG_PLUGIN_SUBDIR);
     try {
       fs.mkdirSync(this.dir, { recursive: true });
       this.ready = true;
@@ -91,7 +93,7 @@ export class EventLog {
 
   private writeRaw(event: BaseEvent): void {
     try {
-      const file = path.join(this.dir, `${dateStamp(event.ts as number)}.jsonl`);
+      const file = path.join(this.dir, `${dateStamp(event.ts)}.jsonl`);
       fs.appendFileSync(file, JSON.stringify(event) + "\n");
     } catch (e) {
       console.warn("[github-sync] EventLog write failed:", e);

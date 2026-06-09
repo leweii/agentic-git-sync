@@ -212,7 +212,7 @@ export class AddSubmoduleModal extends Modal {
         this.remoteMsg = tf(t.addSubRemoteFound, `${owner}/${repo}`);
         // Auto-fill the baseline branch with the repo's default branch
         // unless the user has already typed their own value.
-        this.defaultBranch = (res.json?.default_branch as string) || "";
+        this.defaultBranch = (res.json as { default_branch?: string } | null)?.default_branch ?? "";
         if (this.isTeamMode && !this.upstreamEdited && this.defaultBranch && this.upInput) {
           this.upstreamBranch = this.defaultBranch;
           this.upInput.value = this.defaultBranch;

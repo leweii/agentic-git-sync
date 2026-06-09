@@ -366,8 +366,8 @@ export class SubmoduleManager {
     if (!fs.existsSync(gitmodulesPath)) return configs;
 
     const entries = parseGitmodules(fs.readFileSync(gitmodulesPath, "utf8"));
-    const byPluginId = new Map(entries.filter((e) => e.pluginid).map((e) => [e.pluginid!, e]));
-    const byPath = new Map(entries.filter((e) => e.path).map((e) => [e.path!, e]));
+    const byPluginId = new Map(entries.filter((e) => e.pluginid).map((e) => [e.pluginid, e]));
+    const byPath = new Map(entries.filter((e) => e.path).map((e) => [e.path, e]));
 
     return configs.map((cfg) => {
       const entry = byPluginId.get(cfg.id) ?? byPath.get(cfg.localPath);
@@ -514,10 +514,10 @@ export class SubmoduleManager {
       upstreamBranch: config.upstreamBranch,
       remoteUrl: config.remoteUrl,
       onProgress,
-      // .obsidian/ is a vault-root artifact and must never be committed inside
-      // a submodule, even if Obsidian accidentally creates one there (e.g.
-      // during a folder rename).
-      ignorePatterns: [".obsidian/**"],
+      // The vault config dir (e.g. `.obsidian`) is a vault-root artifact and
+      // must never be committed inside a submodule, even if Obsidian
+      // accidentally creates one there (e.g. during a folder rename).
+      ignorePatterns: [`${this.configDir}/**`],
     });
     await this.updateParentPointer(config);
     return count;

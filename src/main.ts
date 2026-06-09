@@ -119,7 +119,7 @@ export default class GitHubSyncPlugin extends Plugin {
     });
 
     const vaultPath = this.getVaultPath();
-    this.eventLog = new EventLog(vaultPath);
+    this.eventLog = new EventLog(vaultPath, this.app.vault.configDir);
 
     // If user already had settings in data.json but no .github-sync.json
     // yet, generate one — runs once, then a no-op forever after.
@@ -846,7 +846,7 @@ export default class GitHubSyncPlugin extends Plugin {
 
   private handleFolderRename(file: TAbstractFile, oldPath: string): void {
     if (!(file instanceof TFolder)) return;
-    const affected: Array<{ sub: typeof this.settings.submodules[number]; oldSub: string; newSub: string }> = [];
+    const affected: Array<{ sub: SubmoduleConfig; oldSub: string; newSub: string }> = [];
     for (const sub of this.settings.submodules) {
       if (sub.localPath === oldPath) {
         affected.push({ sub, oldSub: oldPath, newSub: file.path });
@@ -892,7 +892,7 @@ export default class GitHubSyncPlugin extends Plugin {
   }
 
   private clearSubmoduleIcons(): void {
-    document.querySelectorAll(".ghs-submodule-icon").forEach(el => el.remove());
+    activeDocument.querySelectorAll(".ghs-submodule-icon").forEach(el => el.remove());
   }
 
   async loadSettings() {
@@ -973,8 +973,9 @@ export default class GitHubSyncPlugin extends Plugin {
    */
   async bundleBugReport(): Promise<{ filePath: string; content: string }> {
     const vaultPath = this.getVaultPath();
-    const logDir = path.join(vaultPath, ".obsidian", "plugins", "agentic-git-sync", "event-log");
-    const reportDir = path.join(vaultPath, ".obsidian", "plugins", "agentic-git-sync", "bug-reports");
+    const configDir = this.app.vault.configDir;
+    const logDir = path.join(vaultPath, configDir, "plugins", "agentic-git-sync", "event-log");
+    const reportDir = path.join(vaultPath, configDir, "plugins", "agentic-git-sync", "bug-reports");
     fs.mkdirSync(reportDir, { recursive: true });
 
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
@@ -1123,7 +1124,7 @@ export default class GitHubSyncPlugin extends Plugin {
     // 3. Reset in-memory + on-disk settings to defaults. saveData() (not
     // saveSettings()) — we deliberately skip the .github-sync.json write
     // because we just deleted it.
-    this.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+    this.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as GitHubSyncSettings;
     await this.saveData(this.settings);
     this.dashboard?.refreshRepos();
     return { backupPaths, cleared };

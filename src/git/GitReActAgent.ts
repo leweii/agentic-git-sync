@@ -40,8 +40,9 @@ const MAX_OBSERVATIONS_IN_A_ROW = 3;
 const WALL_CLOCK_BUDGET_MS = 15_000;
 const TRACE_RETENTION = 50;
 
-const TRACE_SUBDIR = path.join(
-  ".obsidian",
+// Relative to the vault's config dir (e.g. `.obsidian`), which is threaded in
+// as `configDir` — Obsidian lets users rename it, so we never hardcode it.
+const TRACE_PLUGIN_SUBDIR = path.join(
   "plugins",
   "agentic-git-sync",
   "agent-traces",
@@ -87,6 +88,8 @@ export class GitReActAgent {
     providers: AIProvider[] = [],
     private eventLog: EventLog | null = null,
     private repoId = "main",
+    // Vault config dir (e.g. `.obsidian`). Empty in tests, where traces aren't asserted.
+    private configDir = "",
   ) {
     this.providers = providers.filter((p) => p.isAvailable());
   }
@@ -332,7 +335,7 @@ export class GitReActAgent {
 
   private async persistTrace(trace: ReactTrace): Promise<void> {
     try {
-      const dir = path.join(this.vaultPath, TRACE_SUBDIR);
+      const dir = path.join(this.vaultPath, this.configDir, TRACE_PLUGIN_SUBDIR);
       fs.mkdirSync(dir, { recursive: true });
       const stamp = new Date(trace.startedAt).toISOString().replace(/[:.]/g, "-");
       const file = path.join(dir, `${stamp}.json`);

@@ -373,16 +373,18 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
     let lastDetectedUrl = "";
     const detectDefaultBranch = (url: string): void => {
       if (detectTimer !== null) window.clearTimeout(detectTimer);
-      detectTimer = window.setTimeout(async () => {
-        if (url === lastDetectedUrl) return;
-        lastDetectedUrl = url;
-        const def = await fetchRepoDefaultBranch(url, this.plugin.settings.githubToken);
-        if (def && !branchUserEdited && branchInput) {
-          // setValue() doesn't fire onChange, so persist explicitly.
-          branchInput.setValue(def);
-          this.plugin.settings.mainRepoBranch = def;
-          await this.plugin.saveSettings();
-        }
+      detectTimer = window.setTimeout(() => {
+        void (async () => {
+          if (url === lastDetectedUrl) return;
+          lastDetectedUrl = url;
+          const def = await fetchRepoDefaultBranch(url, this.plugin.settings.githubToken);
+          if (def && !branchUserEdited && branchInput !== null) {
+            // setValue() doesn't fire onChange, so persist explicitly.
+            branchInput.setValue(def);
+            this.plugin.settings.mainRepoBranch = def;
+            await this.plugin.saveSettings();
+          }
+        })();
       }, 400);
     };
 
@@ -1090,7 +1092,7 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
             new Notice(tf(t.resetFailedNotice, (e as Error).message));
           }
         };
-        setTimeout(() => input.focus(), 0);
+        window.setTimeout(() => input.focus(), 0);
       }
       onClose(): void { this.contentEl.empty(); }
     })(this.app);

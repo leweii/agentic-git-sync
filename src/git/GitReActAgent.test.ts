@@ -72,8 +72,10 @@ function exec(args: string[], confidence = 5): string {
   return step("git_exec", { args: JSON.stringify(args) }, confidence);
 }
 
+const CONFIG_DIR = ".obsidian";
+
 function tracesDir(vault: string): string {
-  return path.join(vault, ".obsidian", "plugins", "agentic-git-sync", "agent-traces");
+  return path.join(vault, CONFIG_DIR, "plugins", "agentic-git-sync", "agent-traces");
 }
 
 // ---------------------------------------------------------------------------
@@ -295,7 +297,7 @@ describe("GitReActAgent — trace persistence", () => {
     const provider = new ScriptedProvider([
       step("finish", { outcome: "ready_to_retry" }),
     ]);
-    const agent = new GitReActAgent(stubGit(), vault, [provider]);
+    const agent = new GitReActAgent(stubGit(), vault, [provider], null, "main", CONFIG_DIR);
     await agent.run("err", "sync", "main");
 
     const dir = tracesDir(vault);
@@ -311,7 +313,7 @@ describe("GitReActAgent — trace persistence", () => {
     const provider = new ScriptedProvider(
       Array.from({ length: 55 }, () => step("finish", { outcome: "ready_to_retry" })),
     );
-    const agent = new GitReActAgent(stubGit(), vault, [provider]);
+    const agent = new GitReActAgent(stubGit(), vault, [provider], null, "main", CONFIG_DIR);
 
     for (let i = 0; i < 55; i++) {
       await agent.run(`err-${i}`, "sync", "main");

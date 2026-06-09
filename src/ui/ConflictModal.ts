@@ -242,7 +242,7 @@ export class ConflictModal extends Modal {
             this.onResolved();
             this.close();
             new Notice(L().conflict.noticeCleanedResyncing);
-            await this.onForceResync!();
+            await this.onForceResync();
           } catch (e) {
             new Notice(tf(L().conflict.noticeForceCleanFailed, (e as Error).message), 8000);
           }

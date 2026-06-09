@@ -71,7 +71,7 @@ export class SwitchBranchModal extends Modal {
     });
     this.confirmBtn.onclick = () => void this.confirm();
 
-    setTimeout(() => this.inputEl?.focus(), 0);
+    window.setTimeout(() => this.inputEl?.focus(), 0);
   }
 
   private suggestedBranchName(): string {
