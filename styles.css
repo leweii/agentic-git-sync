@@ -3070,50 +3070,66 @@
 }
 
 /* ── GitHub App banner ───────────────────────────────────────── */
-.ghs-settings .ghs-app-banner {
-  display: flex;
+/* Disconnected row: [github icon] GitHub App [Recommended] */
+.ghs-settings .ghs-app-name-icon {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
-  border-radius: 8px;
-  background: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  margin-bottom: 2px;
-}
-
-.ghs-settings .ghs-app-banner-info {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-.ghs-settings .ghs-app-banner-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-  font-size: var(--font-ui-medium);
-}
-
-.ghs-settings .ghs-app-banner-title .svg-icon {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
+  margin-right: 6px;
+  vertical-align: middle;
   opacity: 0.8;
 }
-
-.ghs-settings .ghs-app-banner-desc {
+.ghs-settings .ghs-app-name-icon .svg-icon {
+  width: 15px;
+  height: 15px;
+}
+.ghs-settings .ghs-app-recommended {
+  margin-left: 8px;
   font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
+  font-weight: 500;
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-radius: 4px;
+  padding: 1px 7px;
+  vertical-align: middle;
 }
 
-.ghs-settings .ghs-app-banner-ctrl {
-  display: flex;
+/* Connected row: [check-circle] @login */
+.ghs-settings .ghs-app-conn-icon {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
+  margin-right: 6px;
+  vertical-align: middle;
+  color: var(--color-green);
+}
+.ghs-settings .ghs-app-conn-icon .svg-icon {
+  width: 15px;
+  height: 15px;
+}
+
+/* Tertiary "Connect more accounts" link — separated by a hairline */
+.ghs-settings .ghs-app-add-row {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 16px 10px;
+  border-top: 1px solid var(--background-modifier-border);
+  margin-top: 2px;
+}
+.ghs-settings .ghs-app-add-btn {
+  background: none;
+  border: none;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+  padding: 0;
+  height: auto;
+  min-height: 0;
+  line-height: 1.4;
+}
+.ghs-settings .ghs-app-add-btn:hover {
+  color: var(--text-normal);
+  background: none;
+  box-shadow: none;
 }
 
 /* ── Unified key/token field box ─────────────────────────────────

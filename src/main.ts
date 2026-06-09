@@ -9,7 +9,6 @@ import { ensureRemoteHasCommits, ensureRemoteBranch, isPushPermissionError, crea
 import { SyncScheduler } from "./sync/SyncScheduler";
 import { StatusBar } from "./ui/StatusBar";
 import { SyncDashboard, DASHBOARD_VIEW_TYPE } from "./ui/SyncDashboard";
-import { CreatePRModal } from "./ui/CreatePRModal";
 import { generatePRSummary } from "./ai/PRSummary";
 import { LocalChangesModal } from "./ui/LocalChangesModal";
 import { FileHistoryModal } from "./ui/FileHistoryModal";
@@ -175,6 +174,7 @@ export default class GitHubSyncPlugin extends Plugin {
     });
 
     this.scheduler.setAutoResolver((repoId, conflicts) => this.attemptAutoResolve(repoId, conflicts));
+    this.scheduler.setAutoPR((id) => this.autoCreatePRForSubmodule(id));
 
     this.registerView(DASHBOARD_VIEW_TYPE, (leaf) => new SyncDashboard(leaf, this));
 
@@ -528,68 +528,52 @@ export default class GitHubSyncPlugin extends Plugin {
   }
 
   /**
-   * Open the Create-PR modal for a submodule. Driven by the dashboard's
-   * PR button, which only renders when team mode + upstreamBranch is
-   * configured and differs from the working branch.
-   *
-   * The actual push + API call is deferred to the modal's submit
-   * callback so transient failures keep the modal open for retry.
+   * Silently create a PR after a successful submodule sync.
+   * Fires for both manual and scheduled syncs. Never throws.
+   * Shows a Notice only when a brand-new PR is opened; skips quietly
+   * if one already exists or there are no commits to merge.
    */
-  async openCreatePRForSubmodule(id: string): Promise<void> {
+  async autoCreatePRForSubmodule(id: string): Promise<void> {
+    if (this.settings.usageMode !== "team") return;
     const sub = this.settings.submodules.find((s) => s.id === id);
-    if (!sub) {
-      new Notice(L().dashboard.conflictModalErr);
-      return;
-    }
-    if (!sub.upstreamBranch || sub.upstreamBranch === sub.branch) {
-      // Defensive: button shouldn't be shown in this case.
-      return;
-    }
+    if (!sub?.upstreamBranch || sub.upstreamBranch === sub.branch) return;
+
     const prToken = await this.tokenForUrl(sub.remoteUrl);
-    if (!prToken) {
-      new Notice(L().settings.testNoToken, 6000);
-      return;
-    }
+    if (!prToken) return;
 
-    const gm = this.submoduleManager.gitManagerFor(sub);
-    const defaultTitle = (await gm.lastCommitSubject(sub.branch)) || `${sub.branch} → ${sub.upstreamBranch}`;
-
-    // Capture for the closure — narrows from `string | undefined`.
     const head = sub.branch;
     const base = sub.upstreamBranch;
+    const gm = this.submoduleManager.gitManagerFor(sub);
 
-    const aiProviders = this.buildAIProviders();
-    const generate = aiProviders.some((p) => p.isAvailable())
-      ? async () => {
-          const { commits, diffStat } = await gm.branchSummary(head, base);
-          return await generatePRSummary(aiProviders, { head, base, commits, diffStat });
+    let title: string;
+    let body = "";
+    try {
+      const aiProviders = this.buildAIProviders();
+      if (aiProviders.some((p) => p.isAvailable())) {
+        const { commits, diffStat } = await gm.branchSummary(head, base);
+        const summary = await generatePRSummary(aiProviders, { head, base, commits, diffStat });
+        if (summary) {
+          title = summary.title;
+          body = summary.body;
+        } else {
+          title = (await gm.lastCommitSubject(head)) || `${head} → ${base}`;
         }
-      : undefined;
+      } else {
+        title = (await gm.lastCommitSubject(head)) || `${head} → ${base}`;
+      }
+    } catch {
+      title = `${head} → ${base}`;
+    }
 
-    new CreatePRModal(this.app, {
-      head,
-      base,
-      defaultTitle,
-      generate,
-      loadChanges: () => gm.branchDiff(head, base),
-      submit: async (title, body) => {
-        const t = L().pr;
-        try {
-          await gm.pushCurrent(head);
-        } catch (e) {
-          const reason = friendlyError((e as Error).message ?? String(e));
-          return { ok: false, reason: tf(t.pushFailed, reason) };
-        }
-        return await createPullRequest({
-          remoteUrl: sub.remoteUrl,
-          token: prToken,
-          head,
-          base,
-          title,
-          body,
-        });
-      },
-    }).open();
+    try {
+      const result = await createPullRequest({ remoteUrl: sub.remoteUrl, token: prToken, head, base, title, body });
+      if (result.ok && result.url) {
+        new Notice(`PR opened · ${result.url}`, 10_000);
+      }
+      // "already exists" and "no commits between" → silent
+    } catch (e) {
+      console.warn("[agentic-git-sync] auto PR failed:", (e as Error).message ?? e);
+    }
   }
 
   /**
@@ -716,6 +700,7 @@ export default class GitHubSyncPlugin extends Plugin {
       await this.autoInitSubmodules();
     });
     this.scheduler.setAutoResolver((repoId, conflicts) => this.attemptAutoResolve(repoId, conflicts));
+    this.scheduler.setAutoPR((id) => this.autoCreatePRForSubmodule(id));
     this.scheduler.start();
     this.dashboard?.refreshRepos();
   }

@@ -28,10 +28,10 @@ export class RepoPickerModal extends Modal {
     contentEl.addClass("ghs-add-modal");
     contentEl.createEl("h3", { text: "Choose a repository" });
 
-    if (
-      this.plugin.settings.authMethod !== "githubApp" ||
-      (this.plugin.settings.githubApp?.connections ?? []).length === 0
-    ) {
+    const isAppMode = this.plugin.settings.authMethod === "githubApp";
+    const isPatMode = this.plugin.settings.authMethod === "pat";
+
+    if (isAppMode && (this.plugin.settings.githubApp?.connections ?? []).length === 0) {
       contentEl.createEl("p", {
         cls: "ghs-add-sub",
         text: "Connect the GitHub App first to browse your repositories.",
@@ -41,6 +41,14 @@ export class RepoPickerModal extends Modal {
         void this.plugin.appAuth.beginConnect();
         this.close();
       };
+      return;
+    }
+
+    if (isPatMode && !this.plugin.settings.githubToken) {
+      contentEl.createEl("p", {
+        cls: "ghs-add-sub",
+        text: "Set a Personal Access Token in Settings first to browse your repositories.",
+      });
       return;
     }
 
@@ -56,12 +64,14 @@ export class RepoPickerModal extends Modal {
     listEl.style.overflowY = "auto";
     listEl.setText("Loading repositories…");
 
-    const footer = contentEl.createDiv("ghs-add-sub");
-    footer.style.marginTop = "0.75rem";
-    footer.createSpan({ text: "Don't see it? " });
-    const installLink = footer.createEl("a", { text: "Install the app on another account/org" });
-    installLink.style.cursor = "pointer";
-    installLink.onclick = () => window.open(installUrl(), "_blank");
+    if (isAppMode) {
+      const footer = contentEl.createDiv("ghs-add-sub");
+      footer.style.marginTop = "0.75rem";
+      footer.createSpan({ text: "Don't see it? " });
+      const installLink = footer.createEl("a", { text: "Install the app on another account/org" });
+      installLink.style.cursor = "pointer";
+      installLink.onclick = () => window.open(installUrl(), "_blank");
+    }
 
     let groups: Array<{ login: string; repos: string[] }> = [];
 
@@ -96,10 +106,18 @@ export class RepoPickerModal extends Modal {
 
     void (async () => {
       try {
-        groups = await this.plugin.appAuth.listAccessibleRepos();
+        if (isPatMode) {
+          groups = await listUserRepos(this.plugin.settings.githubToken);
+        } else {
+          groups = await this.plugin.appAuth.listAccessibleRepos();
+        }
         const total = groups.reduce((n, g) => n + g.repos.length, 0);
         if (total === 0) {
-          listEl.setText("No repositories granted. Use the link below to install the app on an account/org.");
+          listEl.setText(
+            isAppMode
+              ? "No repositories granted. Use the link below to install the app on an account/org."
+              : "No repositories found for this token.",
+          );
           return;
         }
         render("");

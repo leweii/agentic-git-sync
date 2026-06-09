@@ -214,6 +214,7 @@ export const DEFAULT_SETTINGS: GitHubSyncSettings = {
 
 export class GitHubSyncSettingTab extends PluginSettingTab {
   plugin: GitHubSyncPlugin;
+  private readonly _onConnected = () => this.display();
 
   constructor(app: App, plugin: GitHubSyncPlugin) {
     super(app, plugin);
@@ -224,6 +225,7 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass("ghs-settings");
+    this.plugin.appAuth.addConnectedListener(this._onConnected);
 
     this.renderSilentHero(containerEl);
     this.renderAccount(containerEl);
@@ -231,6 +233,10 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
     this.renderAI(containerEl);
     this.renderGeneral(containerEl);
     this.renderSaveBar(containerEl);
+  }
+
+  hide(): void {
+    this.plugin.appAuth.removeConnectedListener(this._onConnected);
   }
 
   /**
@@ -341,7 +347,7 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
       text: t.runSetupWizard,
       cls: "mod-cta",
     });
-    wizardBtn.onclick = () => new SetupWizard(this.app, this.plugin).open();
+    wizardBtn.onclick = () => new SetupWizard(this.app, this.plugin, () => this.display()).open();
   }
 
   // ── 1. Repository ────────────────────────────────────────────
@@ -600,41 +606,33 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
   private renderGitHubAppRow(card: HTMLElement): void {
     const conns = this.plugin.settings.githubApp?.connections ?? [];
 
-    const banner = card.createDiv("ghs-app-banner");
-    const info = banner.createDiv("ghs-app-banner-info");
-    const titleRow = info.createDiv("ghs-app-banner-title");
-    setIcon(titleRow.createSpan(), "github");
-    titleRow.createSpan({ text: "GitHub App" });
-    info.createDiv({
-      cls: "ghs-app-banner-desc",
-      text: "Recommended — connect once, no token to manage.",
-    });
-
-    const ctrl = banner.createDiv("ghs-app-banner-ctrl");
     if (conns.length === 0) {
-      const btn = ctrl.createEl("button", {
-        cls: "mod-cta",
-        text: "Connect with GitHub App",
-      });
-      btn.onclick = () => void this.plugin.appAuth.beginConnect();
-    } else {
-      const refreshBtn = ctrl.createEl("button", {
-        cls: "clickable-icon",
-        attr: { type: "button", "aria-label": "Refresh" },
-      });
-      setIcon(refreshBtn, "refresh-cw");
-      refreshBtn.onclick = () => this.display();
-
-      const addBtn = ctrl.createEl("button", { text: "Connect another account" });
-      addBtn.onclick = () => void this.plugin.appAuth.beginConnect();
+      // Disconnected: single row describing the option + connect CTA.
+      const desc = createFragment();
+      desc.appendText("Connect once, no token to manage. ");
+      const installLink = desc.createEl("a", { text: "Install the app on GitHub →" });
+      installLink.setAttribute("href", "https://github.com/apps/agentic-git-sync");
+      installLink.setAttribute("target", "_blank");
+      installLink.setAttribute("rel", "noopener");
+      const s = new Setting(card)
+        .setDesc(desc)
+        .addButton((b) =>
+          b.setCta().setButtonText("Connect with GitHub App →").onClick(() => {
+            void this.plugin.appAuth.beginConnect();
+          })
+        );
+      setIcon(s.nameEl.createSpan({ cls: "ghs-app-name-icon" }), "github");
+      s.nameEl.createSpan({ text: "GitHub App" });
+      s.nameEl.createSpan({ cls: "ghs-app-recommended", text: "Recommended" });
+      return;
     }
 
+    // Connected: one compact row per account — ✓ @login / Access: orgs.
     for (const c of conns) {
-      const accounts =
-        c.installations.map((i) => i.accountLogin).join(", ") || "(no installations — open the app's install page)";
-      new Setting(card)
-        .setName(`@${c.login}`)
-        .setDesc(`Access: ${accounts}`)
+      const accessList =
+        c.installations.map((i) => i.accountLogin).join(", ") || "no installations yet";
+      const s = new Setting(card)
+        .setDesc(`Access: ${accessList}`)
         .addExtraButton((b) =>
           b.setIcon("refresh-cw").setTooltip("Refresh installations").onClick(async () => {
             try {
@@ -643,15 +641,27 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
               new Notice(`Couldn't refresh: ${(e as Error).message}`);
             }
             this.display();
-          }),
+          })
         )
         .addButton((b) =>
           b.setWarning().setButtonText("Disconnect").onClick(async () => {
             await this.plugin.appAuth.disconnect(c.login);
             this.display();
-          }),
+          })
         );
+      setIcon(s.nameEl.createSpan({ cls: "ghs-app-conn-icon" }), "check-circle");
+      s.nameEl.createSpan({ text: `@${c.login}` });
     }
+
+    // Tertiary action: connect a second GitHub identity (rare — only needed
+    // when syncing repos owned by a different GitHub account).
+    const addRow = card.createDiv("ghs-app-add-row");
+    const addBtn = addRow.createEl("button", {
+      cls: "ghs-app-add-btn",
+      text: "+ Connect more GitHub accounts",
+      attr: { title: "Only needed when syncing repos owned by a different GitHub identity" },
+    });
+    addBtn.onclick = () => void this.plugin.appAuth.beginConnect();
   }
 
   private renderAccount(parent: HTMLElement): void {

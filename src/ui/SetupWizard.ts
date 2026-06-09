@@ -20,7 +20,7 @@ export class SetupWizard extends Modal {
   private tokenUser = "";
   private tokenDebounce: number | null = null;
 
-  constructor(app: App, private plugin: GitHubSyncPlugin) {
+  constructor(app: App, private plugin: GitHubSyncPlugin, private onDone?: () => void) {
     super(app);
     this.modalEl.addClass("ghs-wizard-modal");
     this.state = {
@@ -42,7 +42,10 @@ export class SetupWizard extends Modal {
     if (hasCreds) this.step = 2;
   }
 
+  private readonly _onConnected = () => this.render();
+
   async onOpen(): Promise<void> {
+    this.plugin.appAuth.addConnectedListener(this._onConnected);
     this.render();
   }
 
@@ -514,7 +517,9 @@ export class SetupWizard extends Modal {
   }
 
   onClose(): void {
+    this.plugin.appAuth.removeConnectedListener(this._onConnected);
     if (this.tokenDebounce) window.clearTimeout(this.tokenDebounce);
     this.contentEl.empty();
+    this.onDone?.();
   }
 }

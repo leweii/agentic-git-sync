@@ -59,6 +59,10 @@ export class AppAuth implements TokenProvider {
   private patProvider: PatTokenProvider;
   private appProvider: BackendAppTokenProvider;
   private pendingNonce: string | null = null;
+  private connectedListeners: Set<() => void> = new Set();
+
+  addConnectedListener(fn: () => void): void { this.connectedListeners.add(fn); }
+  removeConnectedListener(fn: () => void): void { this.connectedListeners.delete(fn); }
 
   constructor(private host: AppAuthHost) {
     this.patProvider = new PatTokenProvider(() => host.settings.githubToken);
@@ -148,6 +152,7 @@ export class AppAuth implements TokenProvider {
       /* will be refreshed lazily on first token mint / manual refresh */
     }
     new Notice(`Agentic Git Sync connected as @${login}.`);
+    for (const fn of this.connectedListeners) fn();
   }
 
   /** Re-list installations for a connection (e.g. after installing on a new org). */
@@ -180,8 +185,6 @@ export class AppAuth implements TokenProvider {
       (c) => c.login.toLowerCase() !== login.toLowerCase(),
     );
     this.host.settings.githubApp = { connections: remaining };
-    // No App connections left → fall back to the PAT path.
-    if (remaining.length === 0) this.host.settings.authMethod = "pat";
     await this.host.saveSettings();
     this.appProvider.clearCache();
   }

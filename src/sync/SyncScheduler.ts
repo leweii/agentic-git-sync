@@ -27,6 +27,7 @@ export class SyncScheduler {
   private completeListeners: SyncCompleteListener[] = [];
   private autoResolve: AutoResolveCallback | null = null;
   private betweenVaultAndSubsHook: (() => Promise<void>) | null = null;
+  private autoPR: ((id: string) => Promise<void>) | null = null;
   /**
    * Repos with unresolved content conflicts. Auto-scheduled (timer-driven)
    * runs skip these so the user isn't spammed with the same conflict
@@ -58,6 +59,10 @@ export class SyncScheduler {
    */
   setBetweenVaultAndSubsHook(fn: (() => Promise<void>) | null): void {
     this.betweenVaultAndSubsHook = fn;
+  }
+
+  setAutoPR(cb: ((id: string) => Promise<void>) | null): void {
+    this.autoPR = cb;
   }
 
   onStatus(fn: StatusListener): void {
@@ -209,6 +214,7 @@ export class SyncScheduler {
       this.eventLog?.log({ kind: "sync_complete", repo: id, ok: true, count });
       this.emit(id, { phase: "synced" });
       this.emitComplete(id, { ok: true, count });
+      this.autoPR?.(id).catch(() => {});
     } catch (e) {
       if (e instanceof GitConflictError && this.autoResolve) {
         try {

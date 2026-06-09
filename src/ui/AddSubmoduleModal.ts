@@ -54,8 +54,11 @@ export class AddSubmoduleModal extends Modal {
     urlWrap.createEl("label", { text: t.addSubRemoteUrl });
     const urlRow = urlWrap.createDiv("ghs-url-row");
     const urlInput = urlRow.createEl("input", { attr: { placeholder: t.addSubRemoteUrlPh } });
-    // Browse repos the GitHub App can access (App mode only).
-    if (this.plugin.settings.authMethod === "githubApp") {
+    // Browse repos (GitHub App or PAT with a token set).
+    const canBrowse =
+      this.plugin.settings.authMethod === "githubApp" ||
+      (this.plugin.settings.authMethod === "pat" && !!this.plugin.settings.githubToken);
+    if (canBrowse) {
       const browse = urlRow.createEl("button", {
         cls: "ghs-browse-btn clickable-icon",
         attr: { type: "button", "aria-label": "Browse repositories" },
@@ -71,6 +74,15 @@ export class AddSubmoduleModal extends Modal {
     urlBadge.addClass("ghs-hidden");
     urlInput.oninput = () => {
       this.remoteUrl = urlInput.value.trim();
+      // Auto-fill local path from repo name when the user hasn't typed one yet.
+      if (!pathInput.value.trim()) {
+        const repoName = this.remoteUrl.match(/\/([^/]+?)(\.git)?\/?$/)?.[1] ?? "";
+        if (repoName) {
+          pathInput.value = repoName;
+          this.localPath = normalizeRepoPath(repoName);
+          this.checkPath(pathBadge);
+        }
+      }
       if (this.remoteDebounce) window.clearTimeout(this.remoteDebounce);
       if (!this.remoteUrl) {
         this.remoteStatus = "idle";
