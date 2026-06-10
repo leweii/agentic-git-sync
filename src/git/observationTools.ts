@@ -22,7 +22,8 @@ export type ObservationToolExecutor = (ctx: ObservationContext) => Promise<strin
 
 const MAX_OUTPUT = 600;
 
-function truncate(s: string): string {
+/** Exported so recovery-tool output rides the same cap before entering the prompt. */
+export function truncate(s: string): string {
   if (s.length <= MAX_OUTPUT) return s;
   return s.slice(0, MAX_OUTPUT) + "…(truncated)";
 }

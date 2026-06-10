@@ -108,9 +108,9 @@ describe("clear_lock", () => {
     expect(fs.existsSync(refLock)).toBe(false);
   });
 
-  it("no-op when no .git dir exists", async () => {
+  it("no-op when no .git dir exists — reports it instead of throwing", async () => {
     const repo = tmp();
-    await expect(RECOVERY_TOOLS.clear_lock(ctx(repo), {})).resolves.toBeUndefined();
+    await expect(RECOVERY_TOOLS.clear_lock(ctx(repo), {})).resolves.toMatch(/no \.git directory/);
   });
 });
 
@@ -327,6 +327,73 @@ describe("git_exec", () => {
     await expect(
       RECOVERY_TOOLS.git_exec(ctx(repo), { args: JSON.stringify(["clean", "-n"]) }),
     ).rejects.toThrow(/refused|blocked/i);
+  });
+
+  it("REFUSES -C before the subcommand — no smuggling clean past the verb check", async () => {
+    const repo = tmp();
+    initRepo(repo);
+    write(repo, "untracked.md", "user note");
+
+    await expect(
+      RECOVERY_TOOLS.git_exec(ctx(repo), { args: JSON.stringify(["-C", repo, "clean", "-fdx"]) }),
+    ).rejects.toThrow(/refused|blocked/i);
+
+    expect(fs.existsSync(path.join(repo, "untracked.md"))).toBe(true);
+  });
+
+  it("REFUSES --git-dir / --work-tree re-targeting", async () => {
+    const repo = tmp();
+    initRepo(repo);
+    await expect(
+      RECOVERY_TOOLS.git_exec(ctx(repo), {
+        args: JSON.stringify([`--git-dir=${path.join(repo, ".git")}`, "clean", "-fdx"]),
+      }),
+    ).rejects.toThrow(/refused|blocked/i);
+  });
+
+  it("REFUSES -c config injection (could define an alias inline)", async () => {
+    const repo = tmp();
+    initRepo(repo);
+    await expect(
+      RECOVERY_TOOLS.git_exec(ctx(repo), {
+        args: JSON.stringify(["-c", "alias.cl=clean -fdx", "cl"]),
+      }),
+    ).rejects.toThrow(/refused|blocked/i);
+  });
+
+  it("REFUSES defining aliases via git config", async () => {
+    const repo = tmp();
+    initRepo(repo);
+    await expect(
+      RECOVERY_TOOLS.git_exec(ctx(repo), {
+        args: JSON.stringify(["config", "alias.cl", "clean -fdx"]),
+      }),
+    ).rejects.toThrow(/refused|blocked/i);
+    expect(() => git(repo, "git config --get alias.cl")).toThrow();
+  });
+
+  it("REFUSES config keys whose values git executes (core.sshCommand)", async () => {
+    const repo = tmp();
+    initRepo(repo);
+    await expect(
+      RECOVERY_TOOLS.git_exec(ctx(repo), {
+        args: JSON.stringify(["config", "core.sshCommand", "curl evil.example"]),
+      }),
+    ).rejects.toThrow(/refused|blocked/i);
+  });
+
+  it("allows safe global flags (--no-pager) and harmless config keys", async () => {
+    const repo = tmp();
+    initRepo(repo);
+    write(repo, "a.txt", "x");
+    git(repo, "git add . && git commit -m init");
+    await RECOVERY_TOOLS.git_exec(ctx(repo), {
+      args: JSON.stringify(["--no-pager", "log", "-1", "--oneline"]),
+    });
+    // core.longpaths stays allowed — it's the documented recipe for ENAMETOOLONG.
+    await RECOVERY_TOOLS.git_exec(ctx(repo), {
+      args: JSON.stringify(["config", "core.longpaths", "true"]),
+    });
   });
 
   it("rejects invalid args JSON", async () => {

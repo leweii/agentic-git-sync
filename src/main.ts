@@ -1,7 +1,7 @@
 import { Plugin, Notice, FileSystemAdapter, Platform, setIcon, TFolder } from "obsidian";
 import type { TAbstractFile } from "obsidian";
 import { fs, path } from "./node-builtins";
-import { EventLog } from "./observability/EventLog";
+import { EventLog, sanitizeSecrets } from "./observability/EventLog";
 import { GitHubSyncSettings, DEFAULT_SETTINGS, GitHubSyncSettingTab, migrateStaleModels } from "./settings";
 import { GitManager } from "./git/GitManager";
 import { SubmoduleManager } from "./git/SubmoduleManager";
@@ -643,10 +643,12 @@ export default class GitHubSyncPlugin extends Plugin {
     );
   }
 
-  private buildAIProviders(): AIProvider[] {
-    // Order = preference. The ReAct agent tries providers in this order
-    // and stops at the first one that returns a usable response.
-    // Product decision: OpenAI → Gemini → Claude → DeepSeek.
+  /**
+   * Configured providers in preference order: OpenAI → Gemini → Claude →
+   * DeepSeek. Does NOT check the AI master switch — use buildAIProviders for
+   * paths that must respect it; AIClient enforces it internally.
+   */
+  private providerList(): AIProvider[] {
     const ai = this.settings.ai;
     const providers: AIProvider[] = [];
     if (ai.openaiToken) {
@@ -662,6 +664,15 @@ export default class GitHubSyncPlugin extends Plugin {
       providers.push(new DeepSeekProvider({ token: ai.deepseekToken, model: ai.deepseekModel }));
     }
     return providers;
+  }
+
+  private buildAIProviders(): AIProvider[] {
+    // The master AI switch must gate every LLM path. The ReAct error-recovery
+    // agent sends git metadata (error text, file names, commit messages) to
+    // the provider, so "AI disabled" has to mean no provider calls at all —
+    // not just no conflict suggestions.
+    if (!this.settings.ai.enabled) return [];
+    return this.providerList();
   }
 
   reinitGit(): void {
@@ -1019,7 +1030,9 @@ export default class GitHubSyncPlugin extends Plugin {
       sections.push("=== (event log directory missing) ===");
     }
 
-    const content = sections.join("\n");
+    // Belt-and-braces: log lines are sanitized at write time, but files from
+    // before that fix (7-day retention) may still carry credentials.
+    const content = sanitizeSecrets(sections.join("\n"));
     fs.writeFileSync(file, content);
     this.eventLog?.log({
       kind: "user_action",
@@ -1171,22 +1184,8 @@ export default class GitHubSyncPlugin extends Plugin {
   }
 
   getAIClient(): AIClient {
-    // Same preference order as buildAIProviders — OpenAI → Gemini → Claude → DeepSeek.
     const ai = this.settings.ai;
-    const providers: AIProvider[] = [];
-    if (ai.openaiToken) {
-      providers.push(new OpenAIProvider({ token: ai.openaiToken, model: ai.openaiModel }));
-    }
-    if (ai.geminiToken) {
-      providers.push(new GeminiProvider({ token: ai.geminiToken, model: ai.geminiModel }));
-    }
-    if (ai.claudeToken) {
-      providers.push(new ClaudeProvider({ token: ai.claudeToken, model: ai.claudeModel }));
-    }
-    if (ai.deepseekToken) {
-      providers.push(new DeepSeekProvider({ token: ai.deepseekToken, model: ai.deepseekModel }));
-    }
-    return new AIClient(providers, {
+    return new AIClient(this.providerList(), {
       enabled: ai.enabled,
       sendFilePaths: ai.sendFilePaths,
       sendGitMetadata: ai.sendGitMetadata,

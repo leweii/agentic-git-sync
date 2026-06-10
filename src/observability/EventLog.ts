@@ -94,7 +94,11 @@ export class EventLog {
   private writeRaw(event: BaseEvent): void {
     try {
       const file = path.join(this.dir, `${dateStamp(event.ts)}.jsonl`);
-      fs.appendFileSync(file, JSON.stringify(event) + "\n");
+      // Sanitize the serialized line, not individual fields — every event
+      // kind that can carry git's error text (which includes the
+      // insteadOf-rewritten URL, token and all) is covered without each
+      // call site having to remember.
+      fs.appendFileSync(file, sanitizeSecrets(JSON.stringify(event)) + "\n");
     } catch (e) {
       console.warn("[github-sync] EventLog write failed:", e);
     }
@@ -126,10 +130,22 @@ export function sanitizeArgs(args: unknown[]): unknown[] {
   return trimmed.map(sanitizeOne);
 }
 
+/**
+ * Strip credentials from a string: URL userinfo (https://user:token@host) and
+ * GitHub token prefixes. git prints the insteadOf-rewritten URL — embedded
+ * token included — in its error messages, so this must be applied to every
+ * sink that can carry git error text: log lines, agent prompts/observations,
+ * UI messages, bug-report bundles.
+ */
+export function sanitizeSecrets(s: string): string {
+  return s
+    .replace(/(https?:\/\/)([^:@\s/]+:)?[^@\s/]+@/g, "$1<creds>@")
+    .replace(/(github_pat_|ghp_|gho_|ghu_|ghs_)[A-Za-z0-9_]+/g, "<token>");
+}
+
 function sanitizeOne(v: unknown): unknown {
   if (typeof v === "string") {
-    let s = v.replace(/(https?:\/\/)([^:@\s/]+:)?[^@\s/]+@/g, "$1<creds>@");
-    s = s.replace(/(github_pat_|ghp_|gho_|ghu_|ghs_)[A-Za-z0-9_]+/g, "<token>");
+    let s = sanitizeSecrets(v);
     if (s.length > MAX_ARG_CHARS) s = s.slice(0, MAX_ARG_CHARS) + "…";
     return s;
   }

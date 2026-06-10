@@ -14,7 +14,7 @@
 import type { SimpleGit } from "simple-git";
 import { fs, path } from "../node-builtins";
 import type { AIProvider } from "../ai/AIProvider";
-import type { EventLog } from "../observability/EventLog";
+import { sanitizeSecrets, type EventLog } from "../observability/EventLog";
 import {
   REACT_SYSTEM_PROMPT,
   buildReactStepPrompt,
@@ -32,12 +32,20 @@ import {
 import {
   OBSERVATION_TOOLS,
   isObservationTool,
+  truncate,
   type ObservationContext,
 } from "./observationTools";
 
 const MAX_STEPS = 5;
 const MAX_OBSERVATIONS_IN_A_ROW = 3;
-const WALL_CLOCK_BUDGET_MS = 15_000;
+// Two guardrail blocks in a row mean the model isn't reading the feedback —
+// stop paying for LLM calls. A single block is fed back as an observation.
+const MAX_CONSECUTIVE_BLOCKS = 2;
+// Each provider call is individually bounded (requestUrl has no timeout, so a
+// hung provider would otherwise stall sync indefinitely). With per-call
+// timeouts in place the wall clock only needs to cap total loop time.
+const PROVIDER_TIMEOUT_MS = 10_000;
+const WALL_CLOCK_BUDGET_MS = 30_000;
 const TRACE_RETENTION = 50;
 
 // Relative to the vault's config dir (e.g. `.obsidian`), which is threaded in
@@ -55,7 +63,10 @@ const TRACE_PLUGIN_SUBDIR = path.join(
 function accumulatedEvidence(initialError: string, steps: ReactStep[]): string {
   const parts = [initialError];
   for (const s of steps) {
-    if (s.observation) parts.push(s.observation);
+    // Blocked steps never executed — and their block reason quotes the very
+    // keywords the gates look for, so counting them would let one refusal
+    // unlock the next attempt.
+    if (s.observation && !s.observation.startsWith("blocked:")) parts.push(s.observation);
   }
   return parts.join("\n").toLowerCase();
 }
@@ -79,8 +90,60 @@ function hasDestructiveEvidence(tool: string, evidence: string): boolean {
   return patterns.some((re) => re.test(evidence));
 }
 
+/**
+ * git_exec arg lists that discard work the reflog can't restore — uncommitted
+ * working-tree changes (reset --hard) or remote history on hosts that don't
+ * expose a reflog (force push). They ride the same evidence gate as the
+ * specialised destructive tools. Evidence is matched against lowercased text.
+ */
+function dangerousGitExec(
+  argsJson: string | undefined,
+): { label: string; evidence: RegExp[] } | null {
+  let args: unknown;
+  try {
+    args = JSON.parse(argsJson ?? "[]");
+  } catch {
+    return null; // executor rejects malformed args with its own message
+  }
+  if (!Array.isArray(args) || !args.every((a) => typeof a === "string")) return null;
+  const list = args as string[];
+  const cmd = list.find((a) => !a.startsWith("-"));
+  if (cmd === "reset" && list.includes("--hard")) {
+    return {
+      label: "git reset --hard",
+      // "behind" needs a non-zero count nearby: git_remote_state emits
+      // "behind=0" / "behind=?" on every call, which is not evidence.
+      evidence: [/non-fast-forward/, /\[rejected\]/, /behind\D{0,20}[1-9]/, /diverged/],
+    };
+  }
+  if (cmd === "push" && list.some((a) => a === "-f" || a === "--force" || a.startsWith("--force-with-lease"))) {
+    return {
+      label: "force push",
+      evidence: [/non-fast-forward/, /\[rejected\]/, /diverged/, /stale info/],
+    };
+  }
+  return null;
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    p.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); },
+    );
+  });
+}
+
+export interface AgentBudgets {
+  wallClockMs?: number;
+  providerTimeoutMs?: number;
+}
+
 export class GitReActAgent {
   private providers: AIProvider[];
+  private wallClockMs: number;
+  private providerTimeoutMs: number;
 
   constructor(
     private git: SimpleGit,
@@ -90,8 +153,11 @@ export class GitReActAgent {
     private repoId = "main",
     // Vault config dir (e.g. `.obsidian`). Empty in tests, where traces aren't asserted.
     private configDir = "",
+    budgets: AgentBudgets = {},
   ) {
     this.providers = providers.filter((p) => p.isAvailable());
+    this.wallClockMs = budgets.wallClockMs ?? WALL_CLOCK_BUDGET_MS;
+    this.providerTimeoutMs = budgets.providerTimeoutMs ?? PROVIDER_TIMEOUT_MS;
   }
 
   hasProvider(): boolean {
@@ -104,13 +170,19 @@ export class GitReActAgent {
     branch: string,
     remoteUrl?: string,
   ): Promise<ReactTrace> {
+    // Everything that reaches the model or the persisted trace must be free
+    // of credentials. loggedGit scrubs git errors at the source, but this
+    // agent can be constructed without an EventLog — sanitize here too.
+    initialError = sanitizeSecrets(initialError);
     const startedAt = Date.now();
+    const deadline = startedAt + this.wallClockMs;
     const trace: ReactStep[] = [];
     let outcome: ReactTrace["outcome"] = "gave_up";
     let reason = "no steps taken";
+    let blockedStreak = 0;
 
     for (let i = 0; i < MAX_STEPS; i++) {
-      if (Date.now() - startedAt > WALL_CLOCK_BUDGET_MS) {
+      if (Date.now() > deadline) {
         outcome = "guardrail_aborted";
         reason = "wall-clock budget exceeded";
         break;
@@ -118,21 +190,29 @@ export class GitReActAgent {
 
       let step: ReactStep;
       try {
-        step = await this.callModel(initialError, operation, branch, trace);
+        step = await this.callModel(initialError, operation, branch, trace, deadline);
       } catch (e) {
         outcome = "gave_up";
         reason = `all providers failed: ${(e as Error).message}`;
         break;
       }
 
+      // A blocked step is fed back as an observation so the model can correct
+      // course (it still consumes a step). Two blocks in a row mean it isn't
+      // reading the feedback — abort rather than burn the remaining budget.
       const block = this.guardrail(step, trace, initialError);
       if (block) {
-        outcome = "guardrail_aborted";
-        reason = block;
+        blockedStreak++;
         trace.push({ ...step, observation: `blocked: ${block}` });
         this.logStep(i + 1, step, `blocked: ${block}`);
-        break;
+        if (blockedStreak >= MAX_CONSECUTIVE_BLOCKS) {
+          outcome = "guardrail_aborted";
+          reason = block;
+          break;
+        }
+        continue;
       }
+      blockedStreak = 0;
 
       // Terminal action — record but do not execute.
       if (step.action === "finish") {
@@ -145,8 +225,10 @@ export class GitReActAgent {
         break;
       }
 
-      // Execute the chosen tool.
-      const observation = await this.executeTool(step, branch, remoteUrl);
+      // Execute the chosen tool. Observations can quote credential-bearing
+      // text (git error URLs, `git config --list` via git_exec) — sanitize
+      // before the model or the trace file sees them.
+      const observation = sanitizeSecrets(await this.executeTool(step, branch, remoteUrl));
       trace.push({ ...step, observation });
       this.logStep(i + 1, step, observation);
     }
@@ -197,13 +279,23 @@ export class GitReActAgent {
     operation: string,
     branch: string,
     steps: ReactStep[],
+    deadline: number,
   ): Promise<ReactStep> {
     const user = buildReactStepPrompt(initialError, operation, branch, steps);
     const errors: string[] = [];
     for (const p of this.providers) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        errors.push("wall-clock budget exhausted before trying remaining providers");
+        break;
+      }
       const start = Date.now();
       try {
-        const raw = await p.complete(REACT_SYSTEM_PROMPT, user);
+        const raw = await withTimeout(
+          p.complete(REACT_SYSTEM_PROMPT, user),
+          Math.min(this.providerTimeoutMs, remaining),
+          p.name,
+        );
         this.eventLog?.log({
           kind: "llm_call",
           repo: this.repoId,
@@ -246,6 +338,10 @@ export class GitReActAgent {
       return `unknown tool '${step.action}'`;
     }
 
+    // Blocked steps are feedback, not history — they never executed, so they
+    // must not count toward once-per-loop / same-args / observation checks.
+    const executed = prev.filter((s) => !s.observation?.startsWith("blocked:"));
+
     // Catastrophic tool gate — strictest tier, checked before any other recovery
     // gate so the loop reports the most specific reason.
     if (CATASTROPHIC_TOOLS.has(step.action)) {
@@ -253,14 +349,14 @@ export class GitReActAgent {
         return `catastrophic tool '${step.action}' requires confidence == 5`;
       }
       // Once-per-loop — any prior catastrophic step disqualifies a retry
-      if (prev.some((s) => CATASTROPHIC_TOOLS.has(s.action))) {
+      if (executed.some((s) => CATASTROPHIC_TOOLS.has(s.action))) {
         return `catastrophic tool '${step.action}' may only run once per loop`;
       }
       // EITHER fsck observed failure OR the initial error explicitly indicates
       // corruption. Both are sufficient on their own. Word boundaries avoid
       // matching "no errors" / "no missing" as a corruption signal.
       const corruptRe = /\b(error|missing|corrupt|broken|dangling)\b/i;
-      const fsckStep = prev.find((s) => s.action === "git_fsck");
+      const fsckStep = executed.find((s) => s.action === "git_fsck");
       const fsckFailed = fsckStep ? corruptRe.test(fsckStep.observation ?? "") : false;
       const initialIndicatesCorruption = /not a git repository|bad object|index file corrupt/i.test(
         initialError,
@@ -274,18 +370,31 @@ export class GitReActAgent {
       // gate it here. (The step budget caps total work, and the executor
       // refuses dangerous commands.)
       if (step.action !== "git_exec") {
-        const alreadyRan = prev.some((s) => s.action === step.action);
+        const alreadyRan = executed.some((s) => s.action === step.action);
         if (alreadyRan) {
           return `recovery tool '${step.action}' already ran earlier in this loop`;
         }
       } else {
         // Same git_exec args twice — that's the loop-stuck pattern we want
         // to block. Different args are fine.
-        const same = prev.find(
+        const same = executed.find(
           (s) => s.action === "git_exec" && s.params.args === step.params.args,
         );
         if (same) {
           return `git_exec with the same args (${step.params.args}) already ran`;
+        }
+        // History/working-tree-discarding arg lists ride the destructive
+        // evidence gate — uncommitted changes aren't in the reflog, and
+        // GitHub exposes no remote reflog after a force push.
+        const danger = dangerousGitExec(step.params.args);
+        if (danger) {
+          if (step.confidence < 4) {
+            return `${danger.label} requires confidence >= 4`;
+          }
+          const evidence = accumulatedEvidence(initialError, prev);
+          if (!danger.evidence.some((re) => re.test(evidence))) {
+            return `${danger.label} requires a non-fast-forward/behind/diverged signal in the error or observations`;
+          }
         }
       }
     }
@@ -307,7 +416,7 @@ export class GitReActAgent {
 
     // Too many consecutive observations
     if (isObservationTool(step.action)) {
-      const tail = prev.slice(-MAX_OBSERVATIONS_IN_A_ROW);
+      const tail = executed.slice(-MAX_OBSERVATIONS_IN_A_ROW);
       if (
         tail.length >= MAX_OBSERVATIONS_IN_A_ROW &&
         tail.every((s) => isObservationTool(s.action))
@@ -326,8 +435,10 @@ export class GitReActAgent {
         return await OBSERVATION_TOOLS[step.action](ctx);
       }
       const ctx: RecoveryContext = { git: this.git, vaultPath: this.vaultPath, branch, remoteUrl };
-      await RECOVERY_TOOLS[step.action](ctx, step.params);
-      return "ok";
+      // Tools report what they actually did (git_exec returns stdout) — the
+      // model needs that to tell "fixed it" from "ran but changed nothing".
+      const result = await RECOVERY_TOOLS[step.action](ctx, step.params);
+      return typeof result === "string" && result.trim() ? truncate(result.trim()) : "ok";
     } catch (e) {
       return `error: ${(e as Error).message}`;
     }

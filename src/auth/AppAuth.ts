@@ -55,10 +55,13 @@ export interface ProtocolParams {
   state?: string;
 }
 
+/** A Connect attempt left in a browser tab shouldn't be redeemable days later. */
+const NONCE_TTL_MS = 10 * 60_000;
+
 export class AppAuth implements TokenProvider {
   private patProvider: PatTokenProvider;
   private appProvider: BackendAppTokenProvider;
-  private pendingNonce: string | null = null;
+  private pendingNonce: { value: string; at: number } | null = null;
   private connectedListeners: Set<() => void> = new Set();
 
   addConnectedListener(fn: () => void): void { this.connectedListeners.add(fn); }
@@ -108,7 +111,7 @@ export class AppAuth implements TokenProvider {
     const deviceId = await this.ensureDeviceId();
     const deviceIdHash = await sha256Hex(deviceId);
     const nonce = randomB64url(16);
-    this.pendingNonce = nonce;
+    this.pendingNonce = { value: nonce, at: Date.now() };
     const state = encodeState(nonce, deviceIdHash);
     window.open(authorizeUrl(state), "_blank");
     new Notice("Complete the GitHub authorization in your browser, then return to Obsidian.");
@@ -122,8 +125,9 @@ export class AppAuth implements TokenProvider {
       new Notice("Agentic Git Sync: connection response was incomplete.");
       return;
     }
-    if (!this.pendingNonce || params.state !== this.pendingNonce) {
-      new Notice("Agentic Git Sync: connection couldn't be verified (state mismatch).");
+    const pending = this.pendingNonce;
+    if (!pending || params.state !== pending.value || Date.now() - pending.at > NONCE_TTL_MS) {
+      new Notice("Agentic Git Sync: connection couldn't be verified (state mismatch or expired — please reconnect).");
       return;
     }
     this.pendingNonce = null;

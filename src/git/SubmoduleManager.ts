@@ -1,4 +1,5 @@
-import simpleGit, { SimpleGit } from "simple-git";
+import type { SimpleGit } from "simple-git";
+import { makeGit } from "./gitFactory";
 import path from "path";
 import { fs } from "../node-builtins";
 import type { SubmoduleConfig } from "../settings";
@@ -30,7 +31,7 @@ export class SubmoduleManager {
     private providers: AIProvider[] = [],
     private eventLog: EventLog | null = null,
   ) {
-    const raw = simpleGit(vaultPath);
+    const raw = makeGit(vaultPath);
     this.git = eventLog ? wrapGitWithLogging(raw, eventLog, "main") : raw;
   }
 
@@ -104,7 +105,7 @@ export class SubmoduleManager {
    */
   private async alignSubmoduleToBranch(config: SubmoduleConfig): Promise<void> {
     const subPath = `${this.vaultPath}/${config.localPath}`;
-    const subGit = simpleGit(subPath);
+    const subGit = makeGit(subPath);
     const current = await subGit.revparse(["--abbrev-ref", "HEAD"]).then((s) => s.trim()).catch(() => "");
     if (!current || current === config.branch) {
       await this.recordSubmoduleBranch(config).catch(() => {});
@@ -479,7 +480,7 @@ export class SubmoduleManager {
     await this.git.raw(["submodule", "sync", "--", config.localPath]);
     // Also set it directly inside the submodule, in case `submodule sync`
     // skipped this entry (it sometimes does when the path looks odd).
-    const subGit = simpleGit(`${this.vaultPath}/${config.localPath}`);
+    const subGit = makeGit(`${this.vaultPath}/${config.localPath}`);
     await subGit.remote(["set-url", "origin", newUrl]).catch(() => { /* origin may have been remapped already */ });
     // Drop the cached per-submodule GitManager — its `insteadOf` config
     // was set up against the old URL; new one will be initialised on

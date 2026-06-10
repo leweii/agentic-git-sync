@@ -158,10 +158,26 @@ describe("GitReActAgent — guardrails", () => {
     expect(trace.steps.length).toBeGreaterThanOrEqual(3);
   });
 
+  it("a single blocked step is fed back — the model can correct course", async () => {
+    // First attempt under-confident (blocked), second passes the gate.
+    const provider = new ScriptedProvider([
+      step("skip_large_file", { filename: "big.bin" }, 3),
+      step("skip_large_file", { filename: "big.bin" }, 5),
+      step("finish", { outcome: "ready_to_retry" }),
+    ]);
+    const agent = new GitReActAgent(stubGit(), vault, [provider]);
+    const trace = await agent.run("GH001 Large files detected: big.bin", "sync", "main");
+    expect(trace.outcome).toBe("ready_to_retry");
+    expect(trace.steps[0].observation).toMatch(/^blocked: .*confidence/);
+    // The blocked observation reached the model on the next call.
+    expect(provider.callLog[1].user).toContain("blocked:");
+  });
+
   it("specialised tool repeated with observation in between is blocked", async () => {
     const provider = new ScriptedProvider([
       step("clear_lock"),
       step("git_status"),
+      step("clear_lock"),
       step("clear_lock"),
     ]);
     const agent = new GitReActAgent(stubGit(), vault, [provider]);
@@ -170,8 +186,9 @@ describe("GitReActAgent — guardrails", () => {
     expect(trace.reason).toMatch(/clear_lock.*already ran/);
   });
 
-  it("specialised tool twice in a row is blocked", async () => {
+  it("specialised tool retried twice after blocking aborts the loop", async () => {
     const provider = new ScriptedProvider([
+      step("clear_lock"),
       step("clear_lock"),
       step("clear_lock"),
     ]);
@@ -181,8 +198,9 @@ describe("GitReActAgent — guardrails", () => {
     expect(trace.reason).toMatch(/clear_lock.*already ran/);
   });
 
-  it("git_exec with the SAME args twice is blocked", async () => {
+  it("git_exec with the SAME args repeatedly is blocked", async () => {
     const provider = new ScriptedProvider([
+      exec(["merge", "--abort"]),
       exec(["merge", "--abort"]),
       exec(["merge", "--abort"]),
     ]);
@@ -195,6 +213,7 @@ describe("GitReActAgent — guardrails", () => {
   it("destructive tool (skip_large_file) with confidence < 4 is blocked", async () => {
     const provider = new ScriptedProvider([
       step("skip_large_file", { filename: "big.bin" }, 3),
+      step("skip_large_file", { filename: "big.bin" }, 3),
     ]);
     const agent = new GitReActAgent(stubGit(), vault, [provider]);
     const trace = await agent.run("GH001 Large files detected: big.bin", "sync", "main");
@@ -205,12 +224,46 @@ describe("GitReActAgent — guardrails", () => {
   it("destructive tool without explicit error signal is blocked", async () => {
     const provider = new ScriptedProvider([
       step("skip_large_file", { filename: "big.bin" }, 5),
+      step("skip_large_file", { filename: "big.bin" }, 5),
     ]);
     const agent = new GitReActAgent(stubGit(), vault, [provider]);
     // No GH001 / large file keywords in error → no destructive evidence
     const trace = await agent.run("some random error", "sync", "main");
     expect(trace.outcome).toBe("guardrail_aborted");
     expect(trace.reason).toMatch(/signal/);
+  });
+
+  it("git_exec reset --hard without divergence evidence is blocked", async () => {
+    const provider = new ScriptedProvider([
+      exec(["reset", "--hard", "origin/main"]),
+      exec(["reset", "--hard", "origin/main"], 4),
+    ]);
+    const agent = new GitReActAgent(stubGit(), vault, [provider]);
+    const trace = await agent.run("some unrelated error", "sync", "main");
+    expect(trace.outcome).toBe("guardrail_aborted");
+    expect(trace.reason).toMatch(/reset --hard.*signal/);
+  });
+
+  it("git_exec reset --hard with low confidence is blocked even with evidence", async () => {
+    const provider = new ScriptedProvider([
+      exec(["reset", "--hard", "origin/main"], 3),
+      exec(["reset", "--hard", "origin/main"], 2),
+    ]);
+    const agent = new GitReActAgent(stubGit(), vault, [provider]);
+    const trace = await agent.run("! [rejected] main -> main (non-fast-forward)", "sync", "main");
+    expect(trace.outcome).toBe("guardrail_aborted");
+    expect(trace.reason).toMatch(/reset --hard.*confidence/);
+  });
+
+  it("git_exec force push without divergence evidence is blocked", async () => {
+    const provider = new ScriptedProvider([
+      exec(["push", "--force", "origin", "main"]),
+      exec(["push", "-f", "origin", "main"]),
+    ]);
+    const agent = new GitReActAgent(stubGit(), vault, [provider]);
+    const trace = await agent.run("some unrelated error", "sync", "main");
+    expect(trace.outcome).toBe("guardrail_aborted");
+    expect(trace.reason).toMatch(/force push.*signal/);
   });
 
   it("destructive tool with matching signal in initial error is allowed", async () => {
@@ -230,6 +283,7 @@ describe("GitReActAgent — guardrails", () => {
   it("skip_large_file without filename param is blocked", async () => {
     const provider = new ScriptedProvider([
       step("skip_large_file", {}, 5),
+      step("skip_large_file", {}, 5),
     ]);
     const agent = new GitReActAgent(stubGit(), vault, [provider]);
     const trace = await agent.run("GH001: Large files detected", "sync", "main");
@@ -239,6 +293,7 @@ describe("GitReActAgent — guardrails", () => {
 
   it("unknown tool name is blocked", async () => {
     const provider = new ScriptedProvider([
+      step("nuke_repo", {}, 5),
       step("nuke_repo", {}, 5),
     ]);
     const agent = new GitReActAgent(stubGit(), vault, [provider]);
@@ -354,6 +409,7 @@ describe("GitReActAgent — Catastrophic tier", () => {
   it("blocks reinit_from_remote with confidence < 5", async () => {
     const provider = new ScriptedProvider([
       step("reinit_from_remote", {}, 4),
+      step("reinit_from_remote", {}, 4),
     ]);
     const agent = new GitReActAgent(stubGit(), vault, [provider]);
     const trace = await agent.run("fatal: not a git repository", "sync", "main");
@@ -363,6 +419,7 @@ describe("GitReActAgent — Catastrophic tier", () => {
 
   it("blocks reinit_from_remote without prior git_fsck or corruption signal", async () => {
     const provider = new ScriptedProvider([
+      step("reinit_from_remote", {}, 5),
       step("reinit_from_remote", {}, 5),
     ]);
     const agent = new GitReActAgent(stubGit(), vault, [provider]);
@@ -374,6 +431,7 @@ describe("GitReActAgent — Catastrophic tier", () => {
   it("blocks reinit_from_remote when git_fsck ran but reported no errors", async () => {
     const provider = new ScriptedProvider([
       step("git_fsck"),
+      step("reinit_from_remote", {}, 5),
       step("reinit_from_remote", {}, 5),
     ]);
     const agent = new GitReActAgent(fakeGitWithFsck("ok (no errors)"), vault, [provider]);
@@ -398,10 +456,87 @@ describe("GitReActAgent — Catastrophic tier", () => {
     const provider = new ScriptedProvider([
       step("reinit_from_remote", {}, 5),
       step("reinit_from_remote", {}, 5),
+      step("reinit_from_remote", {}, 5),
     ]);
     const agent = new GitReActAgent(fakeGitWithFsck(""), vault, [provider]);
     const trace = await agent.run("fatal: bad object HEAD", "sync", "main", "https://example.com/repo.git");
     expect(trace.outcome).toBe("guardrail_aborted");
     expect(trace.reason).toMatch(/once per loop/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Provider timeouts & tool feedback
+// ---------------------------------------------------------------------------
+
+class HangingProvider implements AIProvider {
+  readonly id = "hang";
+  readonly name = "Hang";
+  isAvailable(): boolean { return true; }
+  async suggest(_req: AISuggestionRequest): Promise<AISuggestion> { throw new Error("not used"); }
+  complete(): Promise<string> { return new Promise(() => { /* never resolves */ }); }
+}
+
+describe("GitReActAgent — timeouts & feedback", () => {
+  let vault: string;
+  beforeEach(() => { vault = tmpVault(); });
+
+  it("a hung provider times out instead of stalling the loop", async () => {
+    const agent = new GitReActAgent(
+      stubGit(), vault, [new HangingProvider()], null, "main", "",
+      { providerTimeoutMs: 50 },
+    );
+    const trace = await agent.run("error", "sync", "main");
+    expect(trace.outcome).toBe("gave_up");
+    expect(trace.reason).toMatch(/timed out/);
+  });
+
+  it("falls back to the next provider after a timeout", async () => {
+    const good = new ScriptedProvider([step("finish", { outcome: "ready_to_retry" })]);
+    const agent = new GitReActAgent(
+      stubGit(), vault, [new HangingProvider(), good], null, "main", "",
+      { providerTimeoutMs: 50 },
+    );
+    const trace = await agent.run("error", "sync", "main");
+    expect(trace.outcome).toBe("ready_to_retry");
+  });
+
+  it("credentials are scrubbed from the initial error and observations", async () => {
+    const tokenUrl = "https://oauth2:ghp_secret123@github.com/leweii/notes.git";
+    const gitStub = {
+      raw: async () => { throw new Error(`fatal: unable to access '${tokenUrl}': 403`); },
+    } as unknown as SimpleGit;
+    const provider = new ScriptedProvider([
+      exec(["pull", "origin", "main", "--no-rebase"]),
+      step("finish", { outcome: "give_up" }),
+    ]);
+    const agent = new GitReActAgent(gitStub, vault, [provider]);
+    const trace = await agent.run(
+      `error: failed to push some refs to '${tokenUrl}'`,
+      "sync",
+      "main",
+    );
+
+    expect(trace.initialError).not.toContain("ghp_secret123");
+    expect(trace.steps[0].observation).not.toContain("ghp_secret123");
+    // Nothing the model was sent may contain the token either.
+    for (const call of provider.callLog) {
+      expect(call.user).not.toContain("ghp_secret123");
+    }
+  });
+
+  it("git_exec stdout is fed back as the observation", async () => {
+    const gitStub = {
+      raw: async () => "Already up to date.\n",
+    } as unknown as SimpleGit;
+    const provider = new ScriptedProvider([
+      exec(["pull", "origin", "main", "--no-rebase"]),
+      step("finish", { outcome: "ready_to_retry" }),
+    ]);
+    const agent = new GitReActAgent(gitStub, vault, [provider]);
+    const trace = await agent.run("err", "sync", "main");
+    expect(trace.steps[0].observation).toBe("Already up to date.");
+    // The model sees the stdout in the next step's prompt.
+    expect(provider.callLog[1].user).toContain("Already up to date.");
   });
 });

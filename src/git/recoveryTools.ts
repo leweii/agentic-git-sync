@@ -23,10 +23,14 @@ export interface RecoveryContext {
   remoteUrl?: string;
 }
 
+/**
+ * Executors may return a short summary of what they did; the ReAct loop feeds
+ * it back to the model as the observation (a void return becomes "ok").
+ */
 export type RecoveryToolExecutor = (
   ctx: RecoveryContext,
   params: Record<string, string>,
-) => Promise<void>;
+) => Promise<string | void>;
 
 /**
  * Destructive tools have irreversible side effects that aren't trivially
@@ -81,12 +85,45 @@ const DENY_PATTERNS: Array<{ re: RegExp; reason: string }> = [
   },
 ];
 
+/**
+ * Global flags allowed before the subcommand. Everything else is refused
+ * by default: `-C`/`--git-dir`/`--work-tree` re-target another repo,
+ * `-c`/`--config-env` inject config overrides (which can define aliases or
+ * command-executing settings), and value-taking flags like `--namespace`
+ * would defeat subcommand detection. No recovery recipe needs any of them.
+ */
+const SAFE_GLOBAL_FLAGS = new Set(["--no-pager", "--no-optional-locks"]);
+
+/**
+ * Config keys whose values git later runs as commands (or that re-route
+ * subcommands, like aliases). Writable via `git config`; left unchecked they
+ * would let a later step smuggle a denied verb past the subcommand check.
+ */
+const EXECUTABLE_CONFIG_KEY =
+  /^(alias|credential|filter|pager|gpg)\.|^core\.(sshcommand|fsmonitor|hookspath|askpass|pager|editor|gitproxy)$|^sequence\.editor$|^remote\.[^.]+\.(uploadpack|receivepack)$|^(diff|merge)\.[^.]+\.(command|driver|textconv)$/i;
+
 function isDenied(args: string[]): string | null {
   if (args.length === 0) return "empty args";
-  const cmd = args[0];
+
+  // The subcommand is the first token after the (allow-listed) global flags.
+  let i = 0;
+  while (i < args.length && args[i].startsWith("-")) {
+    if (!SAFE_GLOBAL_FLAGS.has(args[i])) {
+      return `global flag '${args[i]}' before the subcommand is refused — run plain subcommands against the vault repo`;
+    }
+    i++;
+  }
+  const cmd = args[i];
+  if (!cmd) return "no git subcommand given";
+
   for (const { re, reason } of DENY_PATTERNS) {
     if (re.test(cmd)) return reason;
   }
+
+  if (/^config$/i.test(cmd) && args.slice(i + 1).some((a) => EXECUTABLE_CONFIG_KEY.test(a))) {
+    return "git config on alias/credential/command-executing keys is refused";
+  }
+
   return null;
 }
 
@@ -115,7 +152,8 @@ export const RECOVERY_TOOLS: Record<string, RecoveryToolExecutor> = {
     }
     const deny = isDenied(args as string[]);
     if (deny) throw new Error(`git_exec blocked: ${deny}`);
-    await ctx.git.raw(args as string[]);
+    const out = await ctx.git.raw(args as string[]);
+    return typeof out === "string" ? out.trim() : "";
   },
 
   /**
@@ -159,30 +197,41 @@ export const RECOVERY_TOOLS: Record<string, RecoveryToolExecutor> = {
 
   clear_lock: async (ctx) => {
     const gitDir = resolveGitDir(ctx.vaultPath);
-    if (!gitDir) return;
+    if (!gitDir) return "no .git directory found";
+    const deleted: string[] = [];
     for (const name of ["index.lock", "HEAD.lock", "MERGE_HEAD.lock"]) {
       const lockPath = path.join(gitDir, name);
       try {
         const stat = fs.statSync(lockPath);
-        if (Date.now() - stat.mtimeMs > 30_000) fs.unlinkSync(lockPath);
+        if (Date.now() - stat.mtimeMs > 30_000) {
+          fs.unlinkSync(lockPath);
+          deleted.push(name);
+        }
       } catch { /* file absent — ok */ }
     }
-    const clearRefsLocks = (dir: string) => {
+    const clearRefsLocks = (dir: string, rel: string) => {
       try {
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
           const full = path.join(dir, entry.name);
+          const relPath = rel ? `${rel}/${entry.name}` : entry.name;
           if (entry.isDirectory()) {
-            clearRefsLocks(full);
+            clearRefsLocks(full, relPath);
           } else if (entry.name.endsWith(".lock")) {
             try {
               const stat = fs.statSync(full);
-              if (Date.now() - stat.mtimeMs > 30_000) fs.unlinkSync(full);
+              if (Date.now() - stat.mtimeMs > 30_000) {
+                fs.unlinkSync(full);
+                deleted.push(`refs/${relPath}`);
+              }
             } catch { /* ok */ }
           }
         }
       } catch { /* ok */ }
     };
-    clearRefsLocks(path.join(gitDir, "refs"));
+    clearRefsLocks(path.join(gitDir, "refs"), "");
+    return deleted.length > 0
+      ? `deleted stale locks: ${deleted.join(", ")}`
+      : "no stale lock files found (locks younger than 30 s are left alone)";
   },
 
   /**
@@ -192,14 +241,16 @@ export const RECOVERY_TOOLS: Record<string, RecoveryToolExecutor> = {
    */
   repair_head: async (ctx) => {
     const gitDir = resolveGitDir(ctx.vaultPath);
-    if (!gitDir) return;
+    if (!gitDir) return "no .git directory found";
     const headPath = path.join(gitDir, "HEAD");
     const refPath = path.join(gitDir, "refs", "heads", ctx.branch);
     try {
       fs.statSync(refPath);
       fs.writeFileSync(headPath, `ref: refs/heads/${ctx.branch}\n`);
+      return `HEAD now points at refs/heads/${ctx.branch}`;
     } catch {
       // Ref doesn't exist — leave HEAD alone, caller can create the branch.
+      return `refs/heads/${ctx.branch} does not exist — HEAD left unchanged`;
     }
   },
 
@@ -210,7 +261,7 @@ export const RECOVERY_TOOLS: Record<string, RecoveryToolExecutor> = {
    */
   skip_large_file: async (ctx, params) => {
     const filename = params.filename?.trim();
-    if (!filename) return;
+    if (!filename) return "no filename given — nothing done";
     const gitignorePath = path.join(ctx.vaultPath, ".gitignore");
     const existing = (() => {
       try { return fs.readFileSync(gitignorePath, "utf8"); } catch { return ""; }
@@ -219,6 +270,7 @@ export const RECOVERY_TOOLS: Record<string, RecoveryToolExecutor> = {
       fs.writeFileSync(gitignorePath, existing.trimEnd() + "\n" + filename + "\n");
     }
     await ctx.git.raw(["rm", "--cached", "--ignore-unmatch", filename]).catch(() => {});
+    return `added '${filename}' to .gitignore and removed it from the index`;
   },
 
   /**
@@ -244,6 +296,7 @@ export const RECOVERY_TOOLS: Record<string, RecoveryToolExecutor> = {
       await ctx.git.raw(["remote", "add", "origin", remoteUrl]);
       await ctx.git.fetch("origin", ctx.branch);
       await ctx.git.raw(["reset", "--hard", `origin/${ctx.branch}`]);
+      return `re-initialised from origin/${ctx.branch}; old .git backed up to ${path.basename(backupDir)}`;
     } catch (e) {
       try { fs.rmSync(gitDir, { recursive: true, force: true }); } catch { /* ok */ }
       try { fs.renameSync(backupDir, gitDir); } catch { /* ok */ }

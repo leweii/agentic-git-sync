@@ -88,9 +88,18 @@ describe("classifyByRules", () => {
     expect(plan.tool).toBe("no_recovery");
   });
 
-  it("no longer fast-paths non-fast-forward — routes through agent", () => {
+  it("fast-paths plain non-fast-forward to pull_remote", () => {
     const plan = classifyByRules("! [rejected] main -> main (non-fast-forward)");
+    expect(plan.tool).toBe("pull_remote");
+    expect(plan.confidence).toBe(5);
+  });
+
+  it("does NOT fast-path protected-branch rejections — routes through agent", () => {
+    const plan = classifyByRules(
+      "! [remote rejected] main -> main (protected branch hook declined)",
+    );
     expect(plan.confidence).toBe(0);
+    expect(plan.tool).toBe("no_recovery");
   });
 
   it("no longer fast-paths unrelated histories — routes through agent", () => {

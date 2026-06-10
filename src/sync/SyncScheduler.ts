@@ -5,7 +5,7 @@ import { ensureRemoteHasCommits } from "../git/githubApi";
 import type { GitHubSyncSettings } from "../settings";
 import type { SyncProgress } from "../types";
 import { VAULT_REPO_ID } from "../types";
-import type { EventLog } from "../observability/EventLog";
+import { sanitizeSecrets, type EventLog } from "../observability/EventLog";
 
 export type StatusListener = (id: string, progress: SyncProgress) => void;
 export type SyncCompleteListener = (
@@ -180,6 +180,9 @@ export class SyncScheduler {
       if (e instanceof GitConflictError) this.blockedRepos.add(VAULT_REPO_ID);
 
       const err = e as Error;
+      // The message flows to the UI, sync history, and the log — scrub
+      // credentials in place (covers non-git errors that loggedGit never saw).
+      if (typeof err.message === "string") err.message = sanitizeSecrets(err.message);
       this.eventLog?.log({
         kind: "sync_complete",
         repo: VAULT_REPO_ID,
@@ -233,6 +236,7 @@ export class SyncScheduler {
       if (e instanceof GitConflictError) this.blockedRepos.add(id);
 
       const err = e as Error;
+      if (typeof err.message === "string") err.message = sanitizeSecrets(err.message);
       this.eventLog?.log({
         kind: "sync_complete",
         repo: id,

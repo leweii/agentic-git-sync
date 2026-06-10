@@ -7,3 +7,7 @@ data.json
 
 # macOS
 .DS_Store
+
+# IDE / local tooling
+.idea/
+.lazyweb/

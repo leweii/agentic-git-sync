@@ -79,6 +79,8 @@ Run any git subcommand. params.args is a JSON-stringified array of strings (with
 
 The runtime refuses dangerous commands:
 - \`git clean\` (any flags) is blocked — deletes untracked files which may include user data outside the reflog safety net.
+- Global flags before the subcommand (\`-C\`, \`-c\`, \`--git-dir\`, \`--work-tree\`, …) are blocked — run plain subcommands against the vault repo.
+- \`git config\` on alias / credential / command-executing keys (e.g. \`alias.*\`, \`core.sshCommand\`, \`core.hooksPath\`) is blocked.
 
 Everything else is allowed. Be deliberate.
 
@@ -128,9 +130,11 @@ Replace \`<branch>\` with the actual branch from the prompt.
 - Maximum 5 steps total.
 - Specialised tools may run at most once per loop. git_exec may run multiple times.
 - skip_large_file needs confidence ≥ 4 + matching signal in the error.
+- \`reset --hard\` and force pushes via git_exec need confidence ≥ 4 + a non-fast-forward / behind / diverged signal in the error or a prior observation.
 - reinit_from_remote needs confidence == 5 + git_fsck failure OR explicit corruption keyword.
-- 3 consecutive observations without a recovery action force give_up.
-- \`git clean\` via git_exec is refused at the executor — don't waste a step trying it.
+- More than 3 consecutive observations are blocked — act on what you've seen.
+- A blocked action comes back as \`observation: blocked: <reason>\` — read it and choose differently. Two blocked actions in a row abort the loop.
+- \`git clean\`, global flags before the subcommand, and \`git config\` on alias/command-executing keys are refused at the executor — don't waste a step trying them.
 
 ## Response format
 

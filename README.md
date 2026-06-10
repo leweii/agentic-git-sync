@@ -34,7 +34,7 @@ Private notes stay private while team work happens alongside — independent, no
 
 A background scheduler pulls and pushes on a timer while you write. Tokens and machine-local state stay in `.obsidian/` (never committed); remote URLs and the submodule list live in `.github-sync.json` and travel with the repo, so a fresh clone on another machine restores your config automatically.
 
-## Install
+## Install the plugin
 
 **Community plugins:** Settings → Community plugins → Browse → search *Agentic Git Sync* → Install → Enable.
 
@@ -42,15 +42,23 @@ A background scheduler pulls and pushes on a timer while you write. Tokens and m
 
 ## Get started
 
-Settings → Agentic Git Sync → **Run setup wizard**:
+Settings → Agentic Git Sync → **Run setup wizard**, then connect GitHub.
 
-1. Paste a GitHub Personal Access Token (the `?` icon opens GitHub's token page). Classic needs `repo`; fine-grained needs **Contents: read & write**.
-2. Paste the HTTPS URL of the repo for your main vault. The plugin handles the initial commit and first push.
-3. (Optional) Add per-folder submodules from the dashboard.
+**Recommended — GitHub App** (no token to manage; access scoped to repos you pick):
+
+1. On **Your Credentials**, click **“Connect with GitHub App →”**.
+2. In the browser, choose which repositories to grant, then **Install & Authorize**.
+3. You're returned to Obsidian — the wizard shows **Connected as @you**.
+
+Manage or revoke anytime at [github.com/settings/installations](https://github.com/settings/installations).
+
+**Alternative — Personal Access Token:** on **Your Credentials**, open the token option (the `?` opens GitHub's token page). Classic needs `repo`; fine-grained needs **Contents: read & write**.
+
+Then paste (or **Browse** for) your vault repo's HTTPS URL — the plugin handles the initial commit and push, even for an empty repo. Add per-folder submodules from the dashboard later if you want.
 
 ## Data security
 
-**Secrets never leave your device.** The token lives in `<vault>/.obsidian/plugins/agentic-git-sync/data.json` — local only. The committed `.github-sync.json` has no token field by schema, so credentials cannot leak into a commit.
+**Credentials stay on your device, access stays minimal.** The GitHub App grants only the repos you select and uses short-lived tokens — nothing long-lived in your vault; revoke anytime from [GitHub settings](https://github.com/settings/installations). A PAT lives only in local `data.json`. The committed `.github-sync.json` has no token field by schema, so credentials can't leak into a commit.
 
 ## Git history
 

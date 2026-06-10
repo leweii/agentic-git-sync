@@ -1,8 +1,11 @@
-import simpleGit, { SimpleGit } from "simple-git";
+import type { SimpleGit } from "simple-git";
+import { makeGit } from "./gitFactory";
+import { matchPattern } from "../glob";
 import { fs, path, type Dirent } from "../node-builtins";
 import type { PendingChanges, SyncProgress } from "../types";
 import type { AIProvider } from "../ai/AIProvider";
 import { GitErrorAgent } from "./GitErrorAgent";
+import { resolveGitDir as resolveGitDirAt } from "./recoveryTools";
 import type { EventLog } from "../observability/EventLog";
 import { wrapGitWithLogging } from "./loggedGit";
 import { parseOwnerRepo } from "./githubApi";
@@ -112,7 +115,7 @@ export class GitManager {
     this.tokenProvider = tokenProvider;
     this.configDir = configDir;
     this.eventLog = eventLog;
-    const rawGit = simpleGit(vaultPath);
+    const rawGit = makeGit(vaultPath);
     this.git = eventLog ? wrapGitWithLogging(rawGit, eventLog, repoId) : rawGit;
     this.errorAgent = new GitErrorAgent(this.git, vaultPath, providers, eventLog, repoId, configDir);
     this.ready = this.configureBasics().catch(() => { /* best-effort */ });
@@ -246,34 +249,44 @@ export class GitManager {
   }
 
   /**
-   * Run a git command, retrying on transient network-layer errors that
-   * commonly hit large pushes: broken pipe, connection reset, RPC failed
-   * (HTTP 408/502/503), send-pack disconnect.
+   * Run a git operation, retrying on transient network-layer errors that
+   * commonly hit large transfers: broken pipe, connection reset, RPC failed
+   * (HTTP 408/502/503), send-pack disconnect. Non-transient errors (auth,
+   * conflicts, refspec) re-throw immediately so callers' error handling
+   * sees them unchanged.
    */
-  private async runWithRetry(
-    args: string[],
+  private async withTransientRetry<T>(
+    fn: () => Promise<T>,
     maxAttempts = 3,
-    onProgress?: ProgressFn
-  ): Promise<void> {
+    onProgress?: ProgressFn,
+    phase: "pushing" | "pulling" = "pushing",
+  ): Promise<T> {
     const transientRe = /broken pipe|connection reset|rpc failed|send-pack|operation timed out|http 408|http 5\d\d|early eof|the remote end hung up/i;
     let lastErr: Error | null = null;
     for (let i = 0; i < maxAttempts; i++) {
       try {
-        await this.git.raw(args);
-        return;
+        return await fn();
       } catch (e) {
         lastErr = e as Error;
         const msg = lastErr.message ?? "";
         if (!transientRe.test(msg) || i === maxAttempts - 1) throw lastErr;
         const waitMs = 1000 * Math.pow(2, i); // 1s, 2s, 4s
         onProgress?.({
-          phase: "pushing",
-          message: `Network blip, retrying push in ${waitMs / 1000}s (attempt ${i + 2}/${maxAttempts})…`,
+          phase,
+          message: `Network blip, retrying in ${waitMs / 1000}s (attempt ${i + 2}/${maxAttempts})…`,
         });
         await new Promise((r) => window.setTimeout(r, waitMs));
       }
     }
     throw lastErr ?? new Error("Git command failed after retries.");
+  }
+
+  private async runWithRetry(
+    args: string[],
+    maxAttempts = 3,
+    onProgress?: ProgressFn
+  ): Promise<void> {
+    await this.withTransientRetry(() => this.git.raw(args), maxAttempts, onProgress);
   }
 
   async isRepo(): Promise<boolean> {
@@ -315,17 +328,9 @@ export class GitManager {
    *  Submodules use a gitfile (.git is a file, not a dir) pointing to the parent
    *  repo's .git/modules/<name>/ directory, so we resolve that indirection first. */
   private isMidMerge(): boolean {
+    const gitDir = this.resolveGitDir();
+    if (!gitDir) return false;
     try {
-      const gitFileOrDir = `${this.vaultPath}/.git`;
-      let gitDir: string;
-      const stat = fs.statSync(gitFileOrDir);
-      if (stat.isDirectory()) {
-        gitDir = gitFileOrDir;
-      } else {
-        // gitfile format: "gitdir: <relative-path>"
-        const ref = fs.readFileSync(gitFileOrDir, "utf8").trim().replace(/^gitdir:\s*/, "");
-        gitDir = path.resolve(this.vaultPath, ref);
-      }
       fs.accessSync(path.join(gitDir, "MERGE_HEAD"));
       return true;
     } catch {
@@ -335,15 +340,7 @@ export class GitManager {
 
   /** Resolve the real .git directory, handling submodule gitfile indirection. */
   private resolveGitDir(): string | null {
-    try {
-      const gitFileOrDir = `${this.vaultPath}/.git`;
-      const stat = fs.statSync(gitFileOrDir);
-      if (stat.isDirectory()) return gitFileOrDir;
-      const ref = fs.readFileSync(gitFileOrDir, "utf8").trim().replace(/^gitdir:\s*/, "");
-      return path.resolve(this.vaultPath, ref);
-    } catch {
-      return null;
-    }
+    return resolveGitDirAt(this.vaultPath);
   }
 
   /**
@@ -633,7 +630,15 @@ export class GitManager {
     await this.prepare();
     onProgress?.({ phase: "pulling", message: `Pulling origin/${branch}` });
     try {
-      await this.git.pull("origin", branch, { "--rebase": "false" });
+      // Same transient-network retry as pushes get — without it a flaky
+      // connection turns into a recovery-agent run (or a user-facing error)
+      // for something a 2-second backoff would have absorbed.
+      await this.withTransientRetry(
+        () => this.git.pull("origin", branch, { "--rebase": "false" }),
+        3,
+        onProgress,
+        "pulling",
+      );
     } catch (e) {
       const msg = (e as Error).message ?? "";
       if (msg.includes("refusing to merge unrelated histories")) {
@@ -1050,7 +1055,7 @@ export class GitManager {
 
     // Commit local changes BEFORE pulling so git never has to overwrite
     // uncommitted work during the merge.
-    await this.stageAndCommit(opts.message, ignore, opts.onProgress);
+    const committedBeforePull = await this.stageAndCommit(opts.message, ignore, opts.onProgress);
 
     // Pull remote changes (handles unrelated histories + auto-resolves system files).
     await this.pull(branch, opts.onProgress);
@@ -1067,10 +1072,10 @@ export class GitManager {
     }
 
     // Commit any auto-resolved merge files, then push everything.
-    await this.stageAndCommit(opts.message, ignore, opts.onProgress);
+    const committedAfterMerge = await this.stageAndCommit(opts.message, ignore, opts.onProgress);
     opts.onProgress?.({ phase: "pushing", message: `Pushing to origin/${branch}` });
     await this.runWithRetry(["push", "--set-upstream", "origin", branch], 3, opts.onProgress);
-    return 1;
+    return committedBeforePull + committedAfterMerge;
   }
 
   /**
@@ -1261,20 +1266,3 @@ function parseOverwriteBlockedFiles(msg: string): string[] {
   return files;
 }
 
-// Minimal glob-ish match: supports * and trailing /** style patterns.
-// Good enough for ignore lists like ".obsidian/workspace.json" or "*.tmp".
-function matchPattern(path: string, pattern: string): boolean {
-  if (!pattern) return false;
-  if (pattern === path) return true;
-  // escape regex special chars except * and /
-  const re = new RegExp(
-    "^" +
-      pattern
-        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-        .replace(/\*\*/g, "::DOUBLESTAR::")
-        .replace(/\*/g, "[^/]*")
-        .replace(/::DOUBLESTAR::/g, ".*") +
-      "$"
-  );
-  return re.test(path);
-}

@@ -14,7 +14,7 @@
  */
 
 import type { SimpleGit } from "simple-git";
-import { EventLog, sanitizeArgs } from "../observability/EventLog";
+import { EventLog, sanitizeArgs, sanitizeSecrets } from "../observability/EventLog";
 
 /** Methods we don't want to log — too noisy / not actual git operations. */
 const SKIP_METHODS = new Set<string>([
@@ -46,6 +46,7 @@ export function wrapGitWithLogging(
         try {
           result = original.apply(target, args);
         } catch (e) {
+          scrubError(e);
           log.log({
             kind: "git_op",
             repo: repoId,
@@ -73,6 +74,7 @@ export function wrapGitWithLogging(
               return v;
             },
             (e) => {
+              scrubError(e);
               log.log({
                 kind: "git_op",
                 repo: repoId,
@@ -103,6 +105,18 @@ export function wrapGitWithLogging(
 }
 
 function errSummary(e: unknown): string {
-  if (e instanceof Error) return (e.message ?? String(e)).slice(0, 500);
-  return String(e).slice(0, 500);
+  if (e instanceof Error) return sanitizeSecrets(e.message ?? String(e)).slice(0, 500);
+  return sanitizeSecrets(String(e)).slice(0, 500);
+}
+
+/**
+ * Scrub credentials out of the error in place before it propagates. git's
+ * failures quote the insteadOf-rewritten transport URL — token included —
+ * and this error text flows on to the recovery agent's LLM prompt, the UI,
+ * and sync history. Mutating here cleans every downstream consumer at once.
+ */
+function scrubError(e: unknown): void {
+  if (!(e instanceof Error)) return;
+  if (typeof e.message === "string") e.message = sanitizeSecrets(e.message);
+  if (typeof e.stack === "string") e.stack = sanitizeSecrets(e.stack);
 }

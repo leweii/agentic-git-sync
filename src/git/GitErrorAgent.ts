@@ -19,7 +19,7 @@ import type { SimpleGit } from "simple-git";
 import type { AIProvider } from "../ai/AIProvider";
 import { RECOVERY_TOOLS, type RecoveryContext } from "./recoveryTools";
 import { GitReActAgent } from "./GitReActAgent";
-import type { EventLog } from "../observability/EventLog";
+import { sanitizeSecrets, type EventLog } from "../observability/EventLog";
 
 export interface RecoveryPlan {
   tool: string;
@@ -124,7 +124,7 @@ export class GitErrorAgent {
     branch: string,
     remoteUrl?: string,
   ): Promise<boolean> {
-    const errMsg = error.message || String(error);
+    const errMsg = sanitizeSecrets(error.message || String(error));
     const rules = classifyByRules(errMsg);
 
     this.eventLog?.log({

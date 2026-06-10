@@ -1,4 +1,5 @@
 import type { AIProvider, AISuggestion, AISuggestionRequest } from "./AIProvider";
+import { matchPattern } from "../glob";
 
 export interface AIPrivacySettings {
   enabled: boolean;
@@ -83,20 +84,4 @@ export class AIClient {
     err.providerErrors = errors;
     throw err;
   }
-}
-
-// Reused from GitManager — minimal glob match with * and **.
-function matchPattern(path: string, pattern: string): boolean {
-  if (!pattern) return false;
-  if (pattern === path) return true;
-  const re = new RegExp(
-    "^" +
-      pattern
-        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-        .replace(/\*\*/g, "::DOUBLESTAR::")
-        .replace(/\*/g, "[^/]*")
-        .replace(/::DOUBLESTAR::/g, ".*") +
-      "$"
-  );
-  return re.test(path);
 }
