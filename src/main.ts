@@ -130,51 +130,7 @@ export default class GitHubSyncPlugin extends Plugin {
     this.statusBar = new StatusBar(this.addStatusBarItem());
     this.statusBar.el.onclick = () => this.activateDashboard();
 
-    this.scheduler = new SyncScheduler(
-      this.gitManager,
-      this.submoduleManager,
-      () => this.settings,
-      this.eventLog,
-      (url) => this.tokenForUrl(url),
-    );
-
-    this.scheduler.onStatus((id, progress) => {
-      if (id === VAULT_REPO_ID) {
-        this.statusBar.setPhase(progress.phase, progress.message);
-      }
-      this.dashboard?.onProgress(id, progress);
-    });
-
-    this.scheduler.onComplete((id, result) => {
-      this.recordHistoryFromResult(id, result);
-      void this.refreshStatusBarPending();
-      if (result.ok === false) {
-        this.maybeShowGitNotInstalledModal(result.error.message);
-      }
-      if (
-        this.userSyncIntent &&
-        id === VAULT_REPO_ID &&
-        result.ok === false
-      ) {
-        this.maybeOfferBranchSwitch(
-          result.error.message,
-          this.settings.mainRepoBranch || "main"
-        );
-      }
-    });
-
-    // Run between vault and submodule syncs in every cycle:
-    //   1. Reload .github-sync.json (the vault pull may have updated it).
-    //   2. Clone any newly-declared submodules before we try to sync them —
-    //      otherwise a teammate's new submodule wouldn't get pulled until
-    //      the next plugin reload.
-    this.scheduler.setBetweenVaultAndSubsHook(async () => {
-      await this.reloadRepoConfigOnly();
-      await this.autoInitSubmodules();
-    });
-
-    this.scheduler.setAutoResolver((repoId, conflicts) => this.attemptAutoResolve(repoId, conflicts));
-    this.scheduler.setAutoPR((id) => this.autoCreatePRForSubmodule(id));
+    this.buildScheduler();
 
     this.registerView(DASHBOARD_VIEW_TYPE, (leaf) => new SyncDashboard(leaf, this));
 
@@ -678,6 +634,22 @@ export default class GitHubSyncPlugin extends Plugin {
   reinitGit(): void {
     const vaultPath = this.getVaultPath();
     this.initGit(vaultPath);
+    this.buildScheduler();
+    this.scheduler.start();
+    this.dashboard?.refreshRepos();
+  }
+
+  /**
+   * (Re)create the scheduler and wire all its callbacks. Single source of
+   * truth for the wiring — onload and reinitGit used to duplicate it, and
+   * the copies drifted (reinitGit's onComplete lost the status-bar pending
+   * refresh, so the badge went stale after every sync once the user had
+   * touched settings or the setup wizard).
+   */
+  private buildScheduler(): void {
+    // Replacing the scheduler must kill the old timer, or every reinit
+    // leaks a live interval still syncing through stale closures.
+    this.scheduler?.stop();
     this.scheduler = new SyncScheduler(
       this.gitManager,
       this.submoduleManager,
@@ -685,12 +657,17 @@ export default class GitHubSyncPlugin extends Plugin {
       this.eventLog,
       (url) => this.tokenForUrl(url),
     );
+
     this.scheduler.onStatus((id, progress) => {
-      if (id === VAULT_REPO_ID) this.statusBar.setPhase(progress.phase, progress.message);
+      if (id === VAULT_REPO_ID) {
+        this.statusBar.setPhase(progress.phase, progress.message);
+      }
       this.dashboard?.onProgress(id, progress);
     });
+
     this.scheduler.onComplete((id, result) => {
       this.recordHistoryFromResult(id, result);
+      void this.refreshStatusBarPending();
       if (result.ok === false) {
         this.maybeShowGitNotInstalledModal(result.error.message);
       }
@@ -705,14 +682,19 @@ export default class GitHubSyncPlugin extends Plugin {
         );
       }
     });
+
+    // Run between vault and submodule syncs in every cycle:
+    //   1. Reload .github-sync.json (the vault pull may have updated it).
+    //   2. Clone any newly-declared submodules before we try to sync them —
+    //      otherwise a teammate's new submodule wouldn't get pulled until
+    //      the next plugin reload.
     this.scheduler.setBetweenVaultAndSubsHook(async () => {
       await this.reloadRepoConfigOnly();
       await this.autoInitSubmodules();
     });
+
     this.scheduler.setAutoResolver((repoId, conflicts) => this.attemptAutoResolve(repoId, conflicts));
     this.scheduler.setAutoPR((id) => this.autoCreatePRForSubmodule(id));
-    this.scheduler.start();
-    this.dashboard?.refreshRepos();
   }
 
   getRepoOps(repoId: string): ConflictRepoOps | null {

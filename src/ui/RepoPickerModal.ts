@@ -67,7 +67,7 @@ export class RepoPickerModal extends Modal {
       installLink.onclick = () => window.open(installUrl(), "_blank");
     }
 
-    let groups: Array<{ login: string; repos: string[] }> = [];
+    let groups: Array<{ login: string; repos: string[]; error?: string }> = [];
 
     const render = (filter: string) => {
       listEl.empty();
@@ -75,6 +75,11 @@ export class RepoPickerModal extends Modal {
       let shown = 0;
       for (const g of groups) {
         const matches = g.repos.filter((r) => r.toLowerCase().includes(q));
+        if (matches.length === 0 && g.error && !q) {
+          listEl.createEl("div", { text: `@${g.login}`, cls: "ghs-repo-group" });
+          listEl.createEl("div", { cls: "ghs-add-sub", text: `Couldn't load repositories: ${g.error}` });
+          continue;
+        }
         if (matches.length === 0) continue;
         listEl.createEl("div", { text: `@${g.login}`, cls: "ghs-repo-group" });
         for (const full of matches) {
@@ -101,7 +106,7 @@ export class RepoPickerModal extends Modal {
           groups = await this.plugin.appAuth.listAccessibleRepos();
         }
         const total = groups.reduce((n, g) => n + g.repos.length, 0);
-        if (total === 0) {
+        if (total === 0 && !groups.some((g) => g.error)) {
           listEl.setText(
             isAppMode
               ? "No repositories granted. Use the link below to install the app on an account/org."

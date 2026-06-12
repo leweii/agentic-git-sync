@@ -198,16 +198,30 @@ export class AppAuth implements TokenProvider {
    * login — the data source for the repo picker (DESIGN.md §9.7). Empty
    * in PAT mode.
    */
-  async listAccessibleRepos(): Promise<Array<{ login: string; repos: string[] }>> {
+  async listAccessibleRepos(): Promise<Array<{ login: string; repos: string[]; error?: string }>> {
     if (this.host.settings.authMethod !== "githubApp") return [];
-    const groups: Array<{ login: string; repos: string[] }> = [];
+    // Accounts/orgs can install the app after Connect, so the persisted
+    // installation list may be missing them — re-list before building
+    // the picker, falling back to the stored list when offline.
+    for (const conn of this.host.settings.githubApp.connections) {
+      try {
+        await this.refreshInstallations(conn.login);
+      } catch {
+        /* stored installations remain usable */
+      }
+    }
+    const groups: Array<{ login: string; repos: string[]; error?: string }> = [];
     for (const conn of this.host.settings.githubApp.connections) {
       for (const inst of conn.installations) {
         try {
           const token = await this.appProvider.getTokenForOwner(inst.accountLogin);
           groups.push({ login: inst.accountLogin, repos: await listInstallationRepos(token) });
-        } catch {
-          groups.push({ login: inst.accountLogin, repos: [] });
+        } catch (e) {
+          groups.push({
+            login: inst.accountLogin,
+            repos: [],
+            error: (e as Error).message || "Couldn't list repositories",
+          });
         }
       }
     }

@@ -1,7 +1,7 @@
 {
   "id": "agentic-git-sync",
   "name": "Agentic Git Sync",
-  "version": "1.3.25",
+  "version": "1.3.26",
   "minAppVersion": "1.7.2",
   "description": "An LLM agent runs every git operation for your vault — commits, pulls, pushes, conflict resolution, recovery from broken repo states. Submodules supported. Conflict handling is one piece; the agent automates the whole sync pipeline.",
   "author": "Jakob",
