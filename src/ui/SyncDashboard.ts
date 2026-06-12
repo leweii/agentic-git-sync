@@ -58,6 +58,14 @@ export class SyncDashboard extends ItemView {
   private ghGitManager: GitManager | null = null;
   private ghRepoRelativePath: string | null = null;
 
+  // File history panel sizing (drag-resize / collapsed-to-button)
+  private ghPanelHeight: number | null = null;
+  private ghCollapsed = false;
+  private static readonly GH_MIN_HEIGHT = 80;
+  private static readonly GH_COLLAPSE_AT = 48;
+  private static readonly GH_HEIGHT_KEY = "ghs-history-panel-height";
+  private static readonly GH_COLLAPSED_KEY = "ghs-history-panel-collapsed";
+
   constructor(leaf: WorkspaceLeaf, private plugin: GitHubSyncPlugin) {
     super(leaf);
   }
@@ -67,6 +75,11 @@ export class SyncDashboard extends ItemView {
   getIcon(): string { return "github"; }
 
   async onOpen(): Promise<void> {
+    const savedHeight = Number(this.app.loadLocalStorage(SyncDashboard.GH_HEIGHT_KEY));
+    if (Number.isFinite(savedHeight) && savedHeight >= SyncDashboard.GH_MIN_HEIGHT) {
+      this.ghPanelHeight = savedHeight;
+    }
+    this.ghCollapsed = this.app.loadLocalStorage(SyncDashboard.GH_COLLAPSED_KEY) === "1";
     this.render();
     // Auto-refresh relative timestamps every 30s.
     this.tickHandle = window.setInterval(() => this.refreshTimestamps(), 30_000);
@@ -185,7 +198,11 @@ export class SyncDashboard extends ItemView {
       openSettings.onclick = () => new SetupWizard(this.app, this.plugin).open();
     }
 
-    // File History panel section
+    // File History panel section. The divider above it is draggable to
+    // resize; dragging it near-closed collapses the panel to a header
+    // button, and clicking that button expands it again.
+    const ghResizer = root.createDiv("ghs-gh-resizer");
+    ghResizer.setAttribute("aria-label", "Drag to resize file history");
     this.ghSectionEl = root.createDiv("ghs-gh-section");
     const ghHeader = this.ghSectionEl.createDiv("ghs-gh-header");
     const ghIconWrap = ghHeader.createSpan("ghs-gh-icon");
@@ -194,9 +211,16 @@ export class SyncDashboard extends ItemView {
     const expandBtn = ghHeader.createEl("button", { cls: "ghs-gh-expand-btn", attr: { title: "Open in full view" } });
     setIcon(expandBtn, "maximize-2");
     expandBtn.onclick = () => this.ghOpenModal();
+    const ghChevron = ghHeader.createSpan("ghs-gh-chevron");
+    setIcon(ghChevron, "chevron-up");
+    ghHeader.onclick = () => {
+      if (this.ghCollapsed) this.ghSetCollapsed(false);
+    };
+    this.ghInitResize(ghResizer);
 
     // Commit list
     this.ghListEl = this.ghSectionEl.createDiv("ghs-gh-list");
+    this.ghApplyPanelState();
 
     // Restore displayed file name and commits if a file was already loaded
     // (render() is called during sync, and we must not wipe the user's view).
@@ -340,6 +364,73 @@ export class SyncDashboard extends ItemView {
       }
     }
     void this.plugin.refreshStatusBarPending();
+  }
+
+  // ── File History panel sizing ─────────────────────────────────
+
+  private ghSetCollapsed(collapsed: boolean): void {
+    this.ghCollapsed = collapsed;
+    this.app.saveLocalStorage(SyncDashboard.GH_COLLAPSED_KEY, collapsed ? "1" : null);
+    this.ghApplyPanelState();
+  }
+
+  private ghApplyPanelState(): void {
+    if (!this.ghSectionEl) return;
+    this.ghSectionEl.toggleClass("is-collapsed", this.ghCollapsed);
+    if (!this.ghCollapsed && this.ghPanelHeight !== null) {
+      this.ghSectionEl.style.flex = "0 0 auto";
+      this.ghSectionEl.style.height = `${this.ghPanelHeight}px`;
+    } else {
+      // Collapsed (header-button only) or default flex sizing.
+      this.ghSectionEl.style.flex = "";
+      this.ghSectionEl.style.height = "";
+    }
+  }
+
+  private ghInitResize(handle: HTMLElement): void {
+    handle.addEventListener("pointerdown", (e: PointerEvent) => {
+      const section = this.ghSectionEl;
+      if (!section) return;
+      e.preventDefault();
+      handle.setPointerCapture(e.pointerId);
+      handle.addClass("is-dragging");
+
+      const startY = e.clientY;
+      const startH = this.ghCollapsed ? 0 : section.getBoundingClientRect().height;
+      // Leave room for the dashboard header and a sliver of the repo list.
+      const dashEl = section.parentElement;
+      const maxH = dashEl
+        ? Math.max(SyncDashboard.GH_MIN_HEIGHT, dashEl.getBoundingClientRect().height - 120)
+        : Number.POSITIVE_INFINITY;
+
+      const onMove = (ev: PointerEvent) => {
+        const raw = startH + (startY - ev.clientY);
+        if (raw < SyncDashboard.GH_COLLAPSE_AT) {
+          if (!this.ghCollapsed) {
+            this.ghCollapsed = true;
+            this.ghApplyPanelState();
+          }
+          return;
+        }
+        this.ghCollapsed = false;
+        this.ghPanelHeight = Math.min(Math.max(raw, SyncDashboard.GH_MIN_HEIGHT), maxH);
+        this.ghApplyPanelState();
+      };
+      const onUp = (ev: PointerEvent) => {
+        handle.removeClass("is-dragging");
+        handle.releasePointerCapture(ev.pointerId);
+        handle.removeEventListener("pointermove", onMove);
+        handle.removeEventListener("pointerup", onUp);
+        handle.removeEventListener("pointercancel", onUp);
+        this.app.saveLocalStorage(SyncDashboard.GH_COLLAPSED_KEY, this.ghCollapsed ? "1" : null);
+        if (this.ghPanelHeight !== null) {
+          this.app.saveLocalStorage(SyncDashboard.GH_HEIGHT_KEY, String(this.ghPanelHeight));
+        }
+      };
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", onUp);
+      handle.addEventListener("pointercancel", onUp);
+    });
   }
 
   // ── File History panel ────────────────────────────────────────

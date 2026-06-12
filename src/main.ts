@@ -895,6 +895,13 @@ export default class GitHubSyncPlugin extends Plugin {
     const local = (await this.loadData()) as Partial<GitHubSyncSettings> | null;
     let merged: GitHubSyncSettings = Object.assign({}, DEFAULT_SETTINGS, local ?? {});
 
+    // Installs that predate authMethod (pre-1.3.22) have a PAT saved but
+    // no explicit method — keep them on "pat" instead of the new
+    // "githubApp" default, or their working auth would silently break.
+    if (local && local.authMethod === undefined && local.githubToken) {
+      merged.authMethod = "pat";
+    }
+
     // Migrate retired model names so users who installed an older
     // version don't get HTTP 404s when their saved provider model has
     // been sunset upstream. The model field has no UI yet, so any

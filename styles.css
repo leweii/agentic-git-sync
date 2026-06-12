@@ -1,11 +1,71 @@
 /* ─── File History — right panel ─────────────────────────────── */
 
+.ghs-gh-resizer {
+  flex: 0 0 auto;
+  height: 7px;
+  cursor: row-resize;
+  position: relative;
+  touch-action: none;
+}
+
+.ghs-gh-resizer::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 3px;
+  height: 1px;
+  background: var(--background-modifier-border);
+}
+
+.ghs-gh-resizer:hover::after,
+.ghs-gh-resizer.is-dragging::after {
+  top: 2px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--interactive-accent);
+}
+
 .ghs-gh-section {
-  border-top: 1px solid var(--background-modifier-border);
   display: flex;
   flex-direction: column;
   min-height: 0;
   flex: 1;
+}
+
+/* Collapsed: the panel shrinks to its header, styled as a button. */
+.ghs-gh-section.is-collapsed {
+  flex: 0 0 auto;
+}
+
+.ghs-gh-section.is-collapsed .ghs-gh-list,
+.ghs-gh-section.is-collapsed .ghs-gh-expand-btn {
+  display: none;
+}
+
+.ghs-gh-section.is-collapsed .ghs-gh-header {
+  cursor: pointer;
+  padding: 6px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-secondary);
+}
+
+.ghs-gh-section.is-collapsed .ghs-gh-header:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ghs-gh-chevron {
+  display: none;
+  margin-left: auto;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.ghs-gh-chevron svg { width: 13px; height: 13px; }
+
+.ghs-gh-section.is-collapsed .ghs-gh-chevron {
+  display: inline-flex;
 }
 
 .ghs-gh-header {

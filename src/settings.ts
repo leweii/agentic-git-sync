@@ -174,10 +174,10 @@ export const DEFAULT_SETTINGS: GitHubSyncSettings = {
   autoSyncInterval: 30,
   gitUser: "",
   gitEmail: "",
-  // Default to PAT during the App-auth rollout so a fresh install still
-  // works end-to-end; flipped to "githubApp" once the Connect flow + UI
-  // are complete (milestone 3).
-  authMethod: "pat",
+  // Fresh installs land on the GitHub App tab — it's the recommended
+  // path now that the Connect flow is complete. Existing PAT installs
+  // are kept on "pat" by a migration guard in loadSettings().
+  authMethod: "githubApp",
   githubToken: "",
   deviceId: "",
   githubApp: { connections: [] },
