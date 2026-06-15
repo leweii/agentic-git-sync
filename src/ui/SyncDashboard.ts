@@ -75,11 +75,11 @@ export class SyncDashboard extends ItemView {
   getIcon(): string { return "github"; }
 
   async onOpen(): Promise<void> {
-    const savedHeight = Number(this.app.loadLocalStorage(SyncDashboard.GH_HEIGHT_KEY));
+    const savedHeight = Number(window.localStorage.getItem(SyncDashboard.GH_HEIGHT_KEY));
     if (Number.isFinite(savedHeight) && savedHeight >= SyncDashboard.GH_MIN_HEIGHT) {
       this.ghPanelHeight = savedHeight;
     }
-    this.ghCollapsed = this.app.loadLocalStorage(SyncDashboard.GH_COLLAPSED_KEY) === "1";
+    this.ghCollapsed = window.localStorage.getItem(SyncDashboard.GH_COLLAPSED_KEY) === "1";
     this.render();
     // Auto-refresh relative timestamps every 30s.
     this.tickHandle = window.setInterval(() => this.refreshTimestamps(), 30_000);
@@ -368,22 +368,29 @@ export class SyncDashboard extends ItemView {
 
   // ── File History panel sizing ─────────────────────────────────
 
+  // localStorage helper — null clears the key. App.loadLocalStorage /
+  // saveLocalStorage would be cleaner but postdate our minAppVersion.
+  private ghSavePref(key: string, value: string | null): void {
+    if (value === null) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, value);
+  }
+
   private ghSetCollapsed(collapsed: boolean): void {
     this.ghCollapsed = collapsed;
-    this.app.saveLocalStorage(SyncDashboard.GH_COLLAPSED_KEY, collapsed ? "1" : null);
+    this.ghSavePref(SyncDashboard.GH_COLLAPSED_KEY, collapsed ? "1" : null);
     this.ghApplyPanelState();
   }
 
   private ghApplyPanelState(): void {
     if (!this.ghSectionEl) return;
     this.ghSectionEl.toggleClass("is-collapsed", this.ghCollapsed);
-    if (!this.ghCollapsed && this.ghPanelHeight !== null) {
-      this.ghSectionEl.style.flex = "0 0 auto";
-      this.ghSectionEl.style.height = `${this.ghPanelHeight}px`;
-    } else {
-      // Collapsed (header-button only) or default flex sizing.
-      this.ghSectionEl.style.flex = "";
-      this.ghSectionEl.style.height = "";
+    // Explicit height (via the --ghs-history-height custom prop) only
+    // applies when expanded with a stored size; otherwise fall back to
+    // the stylesheet's default flex sizing / collapsed rule.
+    const sized = !this.ghCollapsed && this.ghPanelHeight !== null;
+    this.ghSectionEl.toggleClass("is-sized", sized);
+    if (sized) {
+      this.ghSectionEl.setCssProps({ "--ghs-history-height": `${this.ghPanelHeight}px` });
     }
   }
 
@@ -422,9 +429,9 @@ export class SyncDashboard extends ItemView {
         handle.removeEventListener("pointermove", onMove);
         handle.removeEventListener("pointerup", onUp);
         handle.removeEventListener("pointercancel", onUp);
-        this.app.saveLocalStorage(SyncDashboard.GH_COLLAPSED_KEY, this.ghCollapsed ? "1" : null);
+        this.ghSavePref(SyncDashboard.GH_COLLAPSED_KEY, this.ghCollapsed ? "1" : null);
         if (this.ghPanelHeight !== null) {
-          this.app.saveLocalStorage(SyncDashboard.GH_HEIGHT_KEY, String(this.ghPanelHeight));
+          this.ghSavePref(SyncDashboard.GH_HEIGHT_KEY, String(this.ghPanelHeight));
         }
       };
       handle.addEventListener("pointermove", onMove);

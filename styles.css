@@ -33,6 +33,12 @@
   flex: 1;
 }
 
+/* Drag-resized: explicit height from the --ghs-history-height prop. */
+.ghs-gh-section.is-sized {
+  flex: 0 0 auto;
+  height: var(--ghs-history-height);
+}
+
 /* Collapsed: the panel shrinks to its header, styled as a button. */
 .ghs-gh-section.is-collapsed {
   flex: 0 0 auto;
