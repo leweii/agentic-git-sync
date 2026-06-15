@@ -99,15 +99,24 @@ export interface GitHubSyncSettings {
   gitEmail: string;
   /** Default auth path. PAT is the "advanced/offline" fallback. */
   authMethod: AuthMethod;
-  /** Personal access token — only used when authMethod === "pat". */
+  /**
+   * Personal access token — only used when authMethod === "pat". SECRET:
+   * persisted to the per-device secret store (config/secretStore.ts),
+   * never to data.json or .github-sync.json.
+   */
   githubToken: string;
   /**
    * Per-device random id (base64url), generated on first connect. Bound
    * into the backend session so a leaked sessionId alone can't mint
-   * tokens. Local-only (never written to .github-sync.json).
+   * tokens. SECRET: kept in the per-device secret store outside the vault
+   * (never written to data.json or .github-sync.json).
    */
   deviceId: string;
-  /** GitHub App connections — local-only (sessionId is a secret). */
+  /**
+   * GitHub App connections. SECRET (each connection carries a backend
+   * sessionId): kept in the per-device secret store outside the vault,
+   * never in data.json or .github-sync.json.
+   */
   githubApp: GitHubAppSettings;
   mainRepoUrl: string;
   mainRepoBranch: string;

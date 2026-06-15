@@ -22,6 +22,8 @@ function loadNodeModule<T>(name: string): T {
 
 export const fs = loadNodeModule<typeof import("fs")>("fs");
 export const path = loadNodeModule<typeof import("path")>("path");
+export const os = loadNodeModule<typeof import("os")>("os");
+export const crypto = loadNodeModule<typeof import("crypto")>("crypto");
 
 // Type-only re-exports. `import("fs")` here is a TypeScript type query
 // (TSImportType) — erased at compile time, no runtime Node dependency.

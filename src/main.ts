@@ -38,6 +38,15 @@ import {
   writeRepoConfig,
   repoConfigExists,
 } from "./config/repoConfigIO";
+import {
+  readSecrets,
+  writeSecrets,
+  clearSecrets,
+  extractSecrets,
+  applySecrets,
+  redactSecrets,
+  settingsHaveInlineSecrets,
+} from "./config/secretStore";
 
 export default class GitHubSyncPlugin extends Plugin {
   settings: GitHubSyncSettings;
@@ -787,7 +796,7 @@ export default class GitHubSyncPlugin extends Plugin {
     const limit = this.settings.historyLimit ?? 20;
     if (limit <= 0) return;
     this.settings.syncHistory = [entry, ...(this.settings.syncHistory ?? [])].slice(0, limit);
-    await this.saveData(this.settings);
+    await this.persistLocal();
     this.dashboard?.refreshHistory();
   }
 
@@ -929,11 +938,56 @@ export default class GitHubSyncPlugin extends Plugin {
       merged.ignorePatterns = [...merged.ignorePatterns, configGlob];
     }
 
-    this.settings = merged;
+    // Secret layer: credentials live in a per-device file OUTSIDE the vault
+    // (see config/secretStore.ts) so they never travel with the synced repo.
+    // The external store is the source of truth when present; otherwise we
+    // bootstrap it from whatever was inline in data.json.
+    const basePath = this.vaultBasePath();
+    const inlineSecrets = settingsHaveInlineSecrets(local);
+    if (basePath) {
+      const stored = readSecrets(basePath);
+      if (stored) applySecrets(merged, stored);
+      this.settings = merged;
+      // One-time migration / cleanup: if data.json still carried any secret
+      // (old installs, or a copied vault), move it to the external store and
+      // rewrite data.json without it. This is what de-fangs leaked configs.
+      if (inlineSecrets || !stored) {
+        await this.persistLocal();
+      }
+    } else {
+      // No filesystem adapter (shouldn't happen on desktop): fall back to
+      // keeping secrets inline so we never silently drop them.
+      this.settings = merged;
+    }
+  }
+
+  /** Absolute path of the open vault, or null if not a filesystem vault. */
+  private vaultBasePath(): string | null {
+    const adapter = this.app.vault.adapter;
+    return adapter instanceof FileSystemAdapter ? adapter.getBasePath() : null;
+  }
+
+  /**
+   * Persist machine-local state: secrets to the external per-device store,
+   * everything else (redacted) to data.json. When no filesystem adapter is
+   * available, falls back to writing the full settings inline.
+   */
+  private async persistLocal(): Promise<void> {
+    const basePath = this.vaultBasePath();
+    if (basePath) {
+      try {
+        writeSecrets(basePath, extractSecrets(this.settings));
+      } catch (e) {
+        console.warn("[github-sync] couldn't write secret store:", e);
+      }
+      await this.saveData(redactSecrets(this.settings));
+    } else {
+      await this.saveData(this.settings);
+    }
   }
 
   async saveSettings() {
-    await this.saveData(this.settings);
+    await this.persistLocal();
     // Mirror repo-level fields into .github-sync.json so they travel
     // with the repo. Non-fatal if write fails (e.g., vault read-only).
     try {
@@ -1125,7 +1179,10 @@ export default class GitHubSyncPlugin extends Plugin {
 
     // 3. Reset in-memory + on-disk settings to defaults. saveData() (not
     // saveSettings()) — we deliberately skip the .github-sync.json write
-    // because we just deleted it.
+    // because we just deleted it. Also delete the external secret store so
+    // the reset truly erases credentials, not just the redacted data.json.
+    const basePath = this.vaultBasePath();
+    if (basePath) clearSecrets(basePath);
     this.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as GitHubSyncSettings;
     await this.saveData(this.settings);
     this.dashboard?.refreshRepos();
