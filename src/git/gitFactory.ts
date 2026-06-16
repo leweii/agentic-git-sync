@@ -31,9 +31,29 @@ function childEnv(): Record<string, string> {
  * simple-git replaces the child environment wholesale when `.env(object)`
  * is used, so the rest of process.env (PATH, HOME, …) is spread in — minus
  * the command-executing keys above.
+ *
+ * The `config` array injects `-c <key>=<value>` before every git subcommand:
+ *
+ *  - credential.helper= (empty) — reset the inherited credential-helper chain
+ *    so no helper runs. The plugin authenticates purely via inline `insteadOf`
+ *    tokens; a helper is never needed. Crucially, leaving it enabled lets a
+ *    GUI helper — Windows Git Credential Manager, macOS osxkeychain — pop an
+ *    interactive account picker, which GIT_TERMINAL_PROMPT=0 does NOT suppress
+ *    (that only gates git's own terminal prompt, not GUI helpers).
+ *  - credential.interactive=false — belt-and-suspenders for GCM specifically.
+ *
+ * `-c` settings propagate to git subprocesses via GIT_CONFIG_PARAMETERS, so
+ * this also disables the helper inside `git submodule add`'s clone subprocess.
  */
 export function makeGit(baseDir: string): SimpleGit {
-  return simpleGit(baseDir).env({
+  return simpleGit(baseDir, {
+    config: ["credential.helper=", "credential.interactive=false"],
+    // simple-git's "unsafe" guard blocks any `-c credential.helper=` because a
+    // helper can normally execute an arbitrary command. Our value is a
+    // hardcoded EMPTY string — the safest possible setting (it disables every
+    // helper, runs nothing) — so opting in here is intentional and safe.
+    unsafe: { allowUnsafeCredentialHelper: true },
+  }).env({
     ...childEnv(),
     LC_ALL: "C",
     GIT_TERMINAL_PROMPT: "0",

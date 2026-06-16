@@ -72,14 +72,48 @@ export class SubmoduleManager {
       .catch(() => {});
   }
 
+  /**
+   * Build a `-c url.<...>.insteadOf=...` flag for the owner of `url`, with
+   * the current token embedded. Passing the rewrite on the command line
+   * (rather than only into the parent's local config) is what makes it
+   * reach `git submodule add`'s clone subprocess: `-c` settings export to
+   * subprocesses via GIT_CONFIG_PARAMETERS, whereas the parent's local
+   * `.git/config` rewrite is not reliably read there (notably on Windows,
+   * where the fallback then hits Git Credential Manager's account picker).
+   */
+  private async ownerInsteadOfFlags(url: string): Promise<string[]> {
+    const p = parseOwnerRepo(url);
+    if (!p) return [];
+    let token = "";
+    try {
+      token = await this.tokenProvider.getTokenForOwner(p.owner);
+    } catch {
+      return [];
+    }
+    if (!token) return [];
+    const gitUser = this.tokenProvider.gitUser();
+    return [
+      "-c",
+      `url.https://${gitUser}:${token}@github.com/${p.owner}/.insteadOf=https://github.com/${p.owner}/`,
+    ];
+  }
+
   // ── Submodule lifecycle ──────────────────────────────────────────
 
   async add(config: SubmoduleConfig): Promise<void> {
-    // The submoduleAdd clone runs as a subprocess that reads the parent's
-    // config — make sure the owner's rewrite is present first.
+    // The submoduleAdd clone runs as a subprocess. Write the owner's rewrite
+    // into local config (for later submodule-gitdir ops) AND pass it as a
+    // -c flag so the clone subprocess itself authenticates with the token
+    // instead of falling back to a credential helper (Windows GCM picker).
     await this.writeOwnerCred(this.git, config.remoteUrl);
-    await this.git.submoduleAdd(config.remoteUrl, config.localPath);
-    await this.git.submoduleUpdate(["--init", config.localPath]);
+    const credFlags = await this.ownerInsteadOfFlags(config.remoteUrl);
+    if (credFlags.length) {
+      await this.git.raw([...credFlags, "submodule", "add", config.remoteUrl, config.localPath]);
+      await this.git.raw([...credFlags, "submodule", "update", "--init", config.localPath]);
+    } else {
+      await this.git.submoduleAdd(config.remoteUrl, config.localPath);
+      await this.git.submoduleUpdate(["--init", config.localPath]);
+    }
     await this.alignSubmoduleToBranch(config);
   }
 
