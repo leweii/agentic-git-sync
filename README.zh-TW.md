@@ -2,6 +2,8 @@
 
 [English](./README.md) | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | [日本語](./README.ja.md)
 
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/jakobhe)
+
 為不懂 git 的 Obsidian 使用者打造的 GitHub 雙向同步外掛。核心是三件事。
 
 ![Obsidian 中的 Agentic Git Sync 面板](./docs/screenshots/dashboard.png)
@@ -57,6 +59,10 @@
 不離開 Obsidian 即可瀏覽任意檔案的提交歷史。點擊某次提交（或 shift-點擊選範圍）查看內嵌 diff；commit message 就是同步時由 AI 生成的語意化訊息。
 
 ![檔案歷史對話框，含提交清單與內嵌 diff](./docs/screenshots/file-history.png)
+
+## 支持
+
+如果這個外掛幫你省了時間，歡迎[在 Ko-fi 上請我喝杯咖啡](https://ko-fi.com/jakobhe) ☕
 
 ## 授權
 

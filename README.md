@@ -2,6 +2,8 @@
 
 [English](./README.md) | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | [日本語](./README.ja.md)
 
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/jakobhe)
+
 A GitHub two-way sync plugin for Obsidian users who don't know git. Three things make it different.
 
 ![Agentic Git Sync dashboard inside Obsidian](./docs/screenshots/dashboard.png)
@@ -65,6 +67,10 @@ Then paste (or **Browse** for) your vault repo's HTTPS URL — the plugin handle
 Browse the commit history of any file without leaving Obsidian. Click a commit (or shift-click a range) to see the diff inline; commit messages are the semantic ones the AI drafted when the change was synced.
 
 ![File history modal with commit list and inline diff](./docs/screenshots/file-history.png)
+
+## Support
+
+If this plugin saves you time, you can [buy me a coffee on Ko-fi](https://ko-fi.com/jakobhe) ☕
 
 ## License
 

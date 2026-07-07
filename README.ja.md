@@ -2,6 +2,8 @@
 
 [English](./README.md) | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | [日本語](./README.ja.md)
 
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/jakobhe)
+
 git を知らない Obsidian ユーザーのための GitHub 双方向同期プラグイン。コアは 3 つ。
 
 ![Obsidian 上の Agentic Git Sync パネル](./docs/screenshots/dashboard.png)
@@ -57,6 +59,10 @@ git を知らない Obsidian ユーザーのための GitHub 双方向同期プ�
 Obsidian を離れずに任意ファイルのコミット履歴を閲覧できる。コミットをクリック（または shift-クリックで範囲選択）すると差分がインラインで表示される。コミットメッセージは同期時に AI が生成したセマンティックなもの。
 
 ![ファイル履歴モーダル：コミット一覧とインライン差分](./docs/screenshots/file-history.png)
+
+## サポート
+
+このプラグインが役に立ったら、[Ko-fi でコーヒーをおごって](https://ko-fi.com/jakobhe)いただけると嬉しいです ☕
 
 ## ライセンス
 
