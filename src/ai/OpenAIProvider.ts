@@ -26,12 +26,21 @@ export interface OpenAIConfig {
   model?: string;
   maxTokens?: number;
   temperature?: number;
+  /** URL prefix including the version segment, e.g. "https://api.openai.com/v1". */
   baseUrl?: string;
+  /** Override id/name when serving another OpenAI-compatible provider. */
+  id?: string;
+  name?: string;
 }
 
+/**
+ * Speaks the OpenAI chat-completions dialect — the de-facto standard served
+ * by most providers in the catalog (Groq, xAI, Moonshot, Together, …), so
+ * one class covers them all via id/name/baseUrl config.
+ */
 export class OpenAIProvider implements AIProvider {
-  readonly id = "openai";
-  readonly name = "OpenAI";
+  readonly id: string;
+  readonly name: string;
 
   private model: string;
   private maxTokens: number;
@@ -39,10 +48,12 @@ export class OpenAIProvider implements AIProvider {
   private baseUrl: string;
 
   constructor(private cfg: OpenAIConfig) {
+    this.id = cfg.id ?? "openai";
+    this.name = cfg.name ?? "OpenAI";
     this.model = cfg.model ?? "gpt-5.5";
     this.maxTokens = cfg.maxTokens ?? 4096;
     this.temperature = cfg.temperature ?? 0.2;
-    this.baseUrl = cfg.baseUrl ?? "https://api.openai.com";
+    this.baseUrl = cfg.baseUrl ?? "https://api.openai.com/v1";
   }
 
   isAvailable(): boolean {
@@ -52,7 +63,7 @@ export class OpenAIProvider implements AIProvider {
   async suggest(req: AISuggestionRequest): Promise<AISuggestion> {
     const prompt = buildPrompt(req);
     const res = await requestUrl({
-      url: `${this.baseUrl}/v1/chat/completions`,
+      url: `${this.baseUrl}/chat/completions`,
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -72,17 +83,19 @@ export class OpenAIProvider implements AIProvider {
     });
 
     if (res.status !== 200) {
-      throw new Error(`OpenAI HTTP ${res.status} — ${truncate(res.text, 200)}`);
+      throw new Error(`${this.name} HTTP ${res.status} — ${truncate(res.text, 200)}`);
     }
 
     const body = res.json as OpenAIChatResponse | null;
     const content = body?.choices?.[0]?.message?.content ?? "";
-    if (!content) throw new Error("OpenAI returned empty response");
+    if (!content) throw new Error(`${this.name} returned empty response`);
 
     const parsed = parseAIResponse(content);
     const inputTokens = Number(body?.usage?.prompt_tokens ?? 0);
     const outputTokens = Number(body?.usage?.completion_tokens ?? 0);
-    const price = PRICING[this.model] ?? PRICING["gpt-5.5"];
+    // Unknown model (e.g. a non-OpenAI provider through this class): report
+    // zero cost rather than a wrong OpenAI rate.
+    const price = PRICING[this.model] ?? (this.id === "openai" ? PRICING["gpt-5.5"] : { in: 0, out: 0 });
 
     return {
       ...parsed,
@@ -95,7 +108,7 @@ export class OpenAIProvider implements AIProvider {
 
   async complete(system: string, user: string): Promise<string> {
     const res = await requestUrl({
-      url: `${this.baseUrl}/v1/chat/completions`,
+      url: `${this.baseUrl}/chat/completions`,
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -115,7 +128,7 @@ export class OpenAIProvider implements AIProvider {
     });
 
     if (res.status !== 200) {
-      throw new Error(`OpenAI HTTP ${res.status} — ${truncate(res.text, 200)}`);
+      throw new Error(`${this.name} HTTP ${res.status} — ${truncate(res.text, 200)}`);
     }
 
     const body = res.json as OpenAIChatResponse | null;

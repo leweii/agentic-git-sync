@@ -2,7 +2,7 @@ import { Plugin, Notice, FileSystemAdapter, Platform, setIcon, TFolder } from "o
 import type { TAbstractFile } from "obsidian";
 import { fs, path } from "./node-builtins";
 import { EventLog, sanitizeSecrets } from "./observability/EventLog";
-import { GitHubSyncSettings, DEFAULT_SETTINGS, GitHubSyncSettingTab, migrateStaleModels } from "./settings";
+import { GitHubSyncSettings, DEFAULT_SETTINGS, GitHubSyncSettingTab, migrateStaleModels, migrateLegacyProviders } from "./settings";
 import { GitManager } from "./git/GitManager";
 import { SubmoduleManager } from "./git/SubmoduleManager";
 import { ensureRemoteHasCommits, ensureRemoteBranch, isPushPermissionError, createPullRequest, parseOwnerRepo } from "./git/githubApi";
@@ -20,17 +20,9 @@ import { VAULT_REPO_ID } from "./types";
 import { AppAuth } from "./auth/AppAuth";
 import { PROTOCOL_ACTION } from "./auth/constants";
 import { AIClient } from "./ai/AIClient";
-import { OpenAIProvider } from "./ai/OpenAIProvider";
-import { GeminiProvider } from "./ai/GeminiProvider";
-import { ClaudeProvider } from "./ai/ClaudeProvider";
-import { DeepSeekProvider } from "./ai/DeepSeekProvider";
 import type { AIProvider } from "./ai/AIProvider";
-import {
-  AnthropicBackend,
-  GeminiBackend,
-  OpenAICompatBackend,
-  type ToolCallBackend,
-} from "./ai/piBackends";
+import { buildBackends, buildSuggestProviders } from "./ai/providerFactory";
+import type { ToolCallBackend } from "./ai/piBackends";
 import { AutoResolver } from "./sync/AutoResolver";
 import type { ConflictRepoOps } from "./sync/ConflictRepoOps";
 import type { SubmoduleConfig } from "./settings";
@@ -615,26 +607,12 @@ export default class GitHubSyncPlugin extends Plugin {
   }
 
   /**
-   * Configured providers in preference order: OpenAI → Gemini → Claude →
-   * DeepSeek. Does NOT check the AI master switch — use buildAIProviders for
-   * paths that must respect it; AIClient enforces it internally.
+   * Configured providers in the user's preference order (ai.providers).
+   * Does NOT check the AI master switch — use buildAIProviders for paths
+   * that must respect it; AIClient enforces it internally.
    */
   private providerList(): AIProvider[] {
-    const ai = this.settings.ai;
-    const providers: AIProvider[] = [];
-    if (ai.openaiToken) {
-      providers.push(new OpenAIProvider({ token: ai.openaiToken, model: ai.openaiModel }));
-    }
-    if (ai.geminiToken) {
-      providers.push(new GeminiProvider({ token: ai.geminiToken, model: ai.geminiModel }));
-    }
-    if (ai.claudeToken) {
-      providers.push(new ClaudeProvider({ token: ai.claudeToken, model: ai.claudeModel }));
-    }
-    if (ai.deepseekToken) {
-      providers.push(new DeepSeekProvider({ token: ai.deepseekToken, model: ai.deepseekModel }));
-    }
-    return providers;
+    return buildSuggestProviders(this.settings.ai.providers ?? []);
   }
 
   private buildAIProviders(): AIProvider[] {
@@ -655,27 +633,7 @@ export default class GitHubSyncPlugin extends Plugin {
    */
   private buildAgentBackends(): ToolCallBackend[] {
     if (!this.settings.ai.enabled) return [];
-    const ai = this.settings.ai;
-    const backends: ToolCallBackend[] = [];
-    if (ai.openaiToken) {
-      backends.push(new OpenAICompatBackend("openai", "OpenAI", {
-        token: ai.openaiToken,
-        model: ai.openaiModel,
-      }, { model: "gpt-5.5", baseUrl: "https://api.openai.com" }));
-    }
-    if (ai.geminiToken) {
-      backends.push(new GeminiBackend({ token: ai.geminiToken, model: ai.geminiModel }));
-    }
-    if (ai.claudeToken) {
-      backends.push(new AnthropicBackend({ token: ai.claudeToken, model: ai.claudeModel }));
-    }
-    if (ai.deepseekToken) {
-      backends.push(new OpenAICompatBackend("deepseek", "DeepSeek", {
-        token: ai.deepseekToken,
-        model: ai.deepseekModel,
-      }, { model: "deepseek-chat", baseUrl: "https://api.deepseek.com" }));
-    }
-    return backends;
+    return buildBackends(this.settings.ai.providers ?? []);
   }
 
   reinitGit(): void {
@@ -985,6 +943,10 @@ export default class GitHubSyncPlugin extends Plugin {
     if (basePath) {
       const stored = readSecrets(basePath);
       if (stored) applySecrets(merged, stored);
+      // After secret hydration: fold pre-1.5 per-provider fields (possibly
+      // just staged by applySecrets from an old-shape secret file) into the
+      // providers array.
+      merged.ai = migrateLegacyProviders(merged.ai);
       this.settings = merged;
       // One-time migration / cleanup: if data.json still carried any secret
       // (old installs, or a copied vault), move it to the external store and
@@ -995,6 +957,7 @@ export default class GitHubSyncPlugin extends Plugin {
     } else {
       // No filesystem adapter (shouldn't happen on desktop): fall back to
       // keeping secrets inline so we never silently drop them.
+      merged.ai = migrateLegacyProviders(merged.ai);
       this.settings = merged;
     }
   }

@@ -4019,3 +4019,11 @@
   margin-top: 8px;
   line-height: 1.4;
 }
+
+/* AI provider list (multi-provider settings) */
+.ghs-key-row .ghs-model-input {
+  max-width: 140px;
+}
+.ghs-baseurl-input {
+  min-width: 220px;
+}

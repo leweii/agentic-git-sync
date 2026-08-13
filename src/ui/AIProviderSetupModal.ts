@@ -1,6 +1,24 @@
 import { App, Modal, setIcon } from "obsidian";
 import type GitHubSyncPlugin from "../main";
 import { L } from "../i18n";
+import type { AISettings } from "../settings";
+
+/** Onboarding covers the four household names; the full pi provider
+ * catalog is available in Settings → AI. */
+const MODAL_PROVIDERS = ["openai", "google", "anthropic", "deepseek"] as const;
+
+function getToken(ai: AISettings, id: string): string {
+  return ai.providers.find((p) => p.provider === id)?.token ?? "";
+}
+
+function setToken(ai: AISettings, id: string, token: string): void {
+  const existing = ai.providers.find((p) => p.provider === id);
+  if (existing) {
+    existing.token = token;
+  } else if (token) {
+    ai.providers.push({ provider: id, token, model: "", baseUrl: "" });
+  }
+}
 
 export class AIProviderSetupModal extends Modal {
   private openai = "";
@@ -17,10 +35,10 @@ export class AIProviderSetupModal extends Modal {
     private onResolve: (saved: boolean) => void,
   ) {
     super(app);
-    this.openai = plugin.settings.ai.openaiToken;
-    this.gemini = plugin.settings.ai.geminiToken;
-    this.claude = plugin.settings.ai.claudeToken;
-    this.deepseek = plugin.settings.ai.deepseekToken;
+    this.openai = getToken(plugin.settings.ai, "openai");
+    this.gemini = getToken(plugin.settings.ai, "google");
+    this.claude = getToken(plugin.settings.ai, "anthropic");
+    this.deepseek = getToken(plugin.settings.ai, "deepseek");
   }
 
   onOpen(): void {
@@ -150,10 +168,13 @@ export class AIProviderSetupModal extends Modal {
       }
       return;
     }
-    this.plugin.settings.ai.openaiToken = this.openai;
-    this.plugin.settings.ai.geminiToken = this.gemini;
-    this.plugin.settings.ai.claudeToken = this.claude;
-    this.plugin.settings.ai.deepseekToken = this.deepseek;
+    const values: Record<(typeof MODAL_PROVIDERS)[number], string> = {
+      openai: this.openai,
+      google: this.gemini,
+      anthropic: this.claude,
+      deepseek: this.deepseek,
+    };
+    for (const id of MODAL_PROVIDERS) setToken(this.plugin.settings.ai, id, values[id]);
     await this.plugin.saveSettings();
     this.saved = true;
     this.close();

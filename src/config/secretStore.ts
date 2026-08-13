@@ -65,12 +65,25 @@ export interface LocalSecrets {
   /** GitHub App connections — each carries a backend `sessionId`. */
   connections: GitHubAppConnection[];
   ai: {
-    openaiToken: string;
-    geminiToken: string;
-    claudeToken: string;
-    deepseekToken: string;
+    /** Provider id (providerCatalog.ts) → API key. */
+    providers: Record<string, string>;
+    /**
+     * True when this object was read from a pre-1.5 secret file whose
+     * tokens were stored under per-provider fields. applySecrets() then
+     * stages them into the legacy settings fields so
+     * migrateLegacyProviders() can create the provider entries.
+     */
+    legacy?: boolean;
   };
 }
+
+/** Pre-1.5 secret-file field → provider id in the new map. */
+const LEGACY_AI_FIELDS: Array<[key: string, providerId: string]> = [
+  ["openaiToken", "openai"],
+  ["geminiToken", "google"],
+  ["claudeToken", "anthropic"],
+  ["deepseekToken", "deepseek"],
+];
 
 /** Pull the secret fields out of an in-memory settings object. */
 export function extractSecrets(s: GitHubSyncSettings): LocalSecrets {
@@ -80,10 +93,11 @@ export function extractSecrets(s: GitHubSyncSettings): LocalSecrets {
     githubToken: s.githubToken ?? "",
     connections: s.githubApp?.connections ?? [],
     ai: {
-      openaiToken: s.ai?.openaiToken ?? "",
-      geminiToken: s.ai?.geminiToken ?? "",
-      claudeToken: s.ai?.claudeToken ?? "",
-      deepseekToken: s.ai?.deepseekToken ?? "",
+      providers: Object.fromEntries(
+        (s.ai?.providers ?? [])
+          .filter((p) => p.token)
+          .map((p) => [p.provider, p.token]),
+      ),
     },
   };
 }
@@ -93,10 +107,19 @@ export function applySecrets(s: GitHubSyncSettings, sec: LocalSecrets): void {
   s.deviceId = sec.deviceId ?? "";
   s.githubToken = sec.githubToken ?? "";
   s.githubApp = { connections: sec.connections ?? [] };
-  s.ai.openaiToken = sec.ai?.openaiToken ?? "";
-  s.ai.geminiToken = sec.ai?.geminiToken ?? "";
-  s.ai.claudeToken = sec.ai?.claudeToken ?? "";
-  s.ai.deepseekToken = sec.ai?.deepseekToken ?? "";
+  const map = sec.ai?.providers ?? {};
+  for (const entry of s.ai.providers ?? []) {
+    entry.token = map[entry.provider] ?? "";
+  }
+  if (sec.ai?.legacy) {
+    // Old-shape file: tokens may belong to providers that have no entry yet
+    // (they lived only in the secret store). Stage them in the legacy fields;
+    // migrateLegacyProviders() turns them into entries right after this.
+    s.ai.openaiToken = map["openai"] ?? "";
+    s.ai.geminiToken = map["google"] ?? "";
+    s.ai.claudeToken = map["anthropic"] ?? "";
+    s.ai.deepseekToken = map["deepseek"] ?? "";
+  }
 }
 
 /**
@@ -109,7 +132,14 @@ export function redactSecrets(s: GitHubSyncSettings): GitHubSyncSettings {
     githubToken: "",
     deviceId: "",
     githubApp: { connections: [] },
-    ai: { ...s.ai, openaiToken: "", geminiToken: "", claudeToken: "", deepseekToken: "" },
+    ai: {
+      ...s.ai,
+      providers: (s.ai.providers ?? []).map((p) => ({ ...p, token: "" })),
+      openaiToken: "",
+      geminiToken: "",
+      claudeToken: "",
+      deepseekToken: "",
+    },
   };
 }
 
@@ -121,6 +151,7 @@ export function settingsHaveInlineSecrets(s: Partial<GitHubSyncSettings> | null)
   if (s.githubApp?.connections?.length) return true;
   const ai = s.ai;
   if (ai && (ai.openaiToken || ai.geminiToken || ai.claudeToken || ai.deepseekToken)) return true;
+  if (ai?.providers?.some((p) => p.token)) return true;
   return false;
 }
 
@@ -129,18 +160,34 @@ export function readSecrets(vaultBasePath: string): LocalSecrets | null {
   try {
     const file = secretFilePath(vaultBasePath);
     if (!fs.existsSync(file)) return null;
-    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<LocalSecrets>;
+    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as {
+      deviceId?: string;
+      githubToken?: string;
+      connections?: GitHubAppConnection[];
+      ai?: Record<string, unknown> & { providers?: Record<string, string> };
+    };
+    // New shape stores a provider→token map; pre-1.5 files stored one field
+    // per provider. Normalise to the map and flag legacy so applySecrets can
+    // stage the old fields for entry migration.
+    let providers: Record<string, string> = {};
+    let legacy = false;
+    if (raw.ai?.providers && typeof raw.ai.providers === "object") {
+      for (const [k, v] of Object.entries(raw.ai.providers)) {
+        if (typeof v === "string" && v) providers[k] = v;
+      }
+    } else if (raw.ai) {
+      legacy = true;
+      for (const [field, id] of LEGACY_AI_FIELDS) {
+        const v = raw.ai[field];
+        if (typeof v === "string" && v) providers[id] = v;
+      }
+    }
     return {
       version: SECRETS_VERSION,
       deviceId: typeof raw.deviceId === "string" ? raw.deviceId : "",
       githubToken: typeof raw.githubToken === "string" ? raw.githubToken : "",
       connections: Array.isArray(raw.connections) ? raw.connections : [],
-      ai: {
-        openaiToken: raw.ai?.openaiToken ?? "",
-        geminiToken: raw.ai?.geminiToken ?? "",
-        claudeToken: raw.ai?.claudeToken ?? "",
-        deepseekToken: raw.ai?.deepseekToken ?? "",
-      },
+      ai: { providers, ...(legacy ? { legacy: true } : {}) },
     };
   } catch (e) {
     console.warn("[github-sync] couldn't read secret store:", e);

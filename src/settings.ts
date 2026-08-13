@@ -10,10 +10,12 @@ import { EditSubmoduleModal } from "./ui/EditSubmoduleModal";
 import { SetupWizard } from "./ui/SetupWizard";
 import type { AIProvider } from "./ai/AIProvider";
 import { testAIProvider } from "./ai/AIProvider";
-import { OpenAIProvider } from "./ai/OpenAIProvider";
-import { GeminiProvider } from "./ai/GeminiProvider";
-import { ClaudeProvider } from "./ai/ClaudeProvider";
-import { DeepSeekProvider } from "./ai/DeepSeekProvider";
+import { buildSuggestProvider, type AIProviderEntry } from "./ai/providerFactory";
+import {
+  CUSTOM_PROVIDER_ID,
+  PROVIDER_CATALOG,
+  catalogEntry,
+} from "./ai/providerCatalog";
 
 export interface SubmoduleConfig {
   id: string;
@@ -39,8 +41,15 @@ export interface AISettings {
   enabled: boolean;
   silentMode: boolean;
   silentAutonomyLevel: number;
-  // Order here reflects the UI / runtime preference order:
-  // OpenAI → Gemini → Claude → DeepSeek.
+  /**
+   * Configured providers in failover preference order (providerCatalog.ts
+   * lists what's available). Tokens hydrate from the per-device secret
+   * store; data.json and .github-sync.json only carry the structure.
+   */
+  providers: AIProviderEntry[];
+  // Legacy per-provider fields (pre-1.5). Still read from old data.json /
+  // secret files, migrated into `providers` by migrateLegacyProviders(),
+  // then kept empty. Do not add UI for these.
   openaiToken: string;
   openaiModel: string;
   geminiToken: string;
@@ -167,11 +176,56 @@ export function migrateStaleModels(ai: AISettings): AISettings {
   const claudeToken = typeof ai.claudeToken === "string" ? ai.claudeToken : "";
   return {
     ...ai,
+    providers: Array.isArray(ai.providers)
+      ? ai.providers.map((p) => ({ ...p, model: replace(p.model ?? "") }))
+      : [],
     openaiModel: replace(ai.openaiModel),
     geminiModel: replace(ai.geminiModel),
     claudeToken,
     claudeModel: replace(claudeModel),
     deepseekModel: replace(ai.deepseekModel),
+  };
+}
+
+/**
+ * Fold the pre-1.5 per-provider fields into the `providers` array. Runs
+ * after secret hydration (tokens may live only in the secret store). Legacy
+ * fields are blanked afterwards so they can't shadow the array. Idempotent.
+ */
+export function migrateLegacyProviders(ai: AISettings): AISettings {
+  const providers: AIProviderEntry[] = Array.isArray(ai.providers)
+    ? ai.providers.filter((p) => p && typeof p.provider === "string" && p.provider)
+        .map((p) => ({
+          provider: p.provider,
+          token: typeof p.token === "string" ? p.token : "",
+          model: typeof p.model === "string" ? p.model : "",
+          baseUrl: typeof p.baseUrl === "string" ? p.baseUrl : "",
+          ...(p.label ? { label: p.label } : {}),
+        }))
+    : [];
+  // Same preference order the legacy fields had: OpenAI → Gemini → Claude → DeepSeek.
+  const legacy: Array<{ id: string; token: string; model: string }> = [
+    { id: "openai", token: ai.openaiToken, model: ai.openaiModel },
+    { id: "google", token: ai.geminiToken, model: ai.geminiModel },
+    { id: "anthropic", token: ai.claudeToken, model: ai.claudeModel },
+    { id: "deepseek", token: ai.deepseekToken, model: ai.deepseekModel },
+  ];
+  for (const l of legacy) {
+    if (!l.token) continue;
+    const existing = providers.find((p) => p.provider === l.id);
+    if (existing) {
+      if (!existing.token) existing.token = l.token;
+    } else {
+      providers.push({ provider: l.id, token: l.token, model: l.model ?? "", baseUrl: "" });
+    }
+  }
+  return {
+    ...ai,
+    providers,
+    openaiToken: "",
+    geminiToken: "",
+    claudeToken: "",
+    deepseekToken: "",
   };
 }
 
@@ -206,6 +260,7 @@ export const DEFAULT_SETTINGS: GitHubSyncSettings = {
     enabled: true,
     silentMode: false,
     silentAutonomyLevel: 3,
+    providers: [],
     openaiToken: "",
     openaiModel: "gpt-5.5",
     geminiToken: "",
@@ -820,78 +875,60 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
   private renderAI(parent: HTMLElement): void {
     const t = L().settings;
     const card = this.sectionHeader(parent, t.sectionAI);
+    const entries = this.plugin.settings.ai.providers;
 
-    this.renderAIProviderRow(card, {
-      label: t.openaiLabel,
-      placeholder: "sk-…",
-      getToken: () => this.plugin.settings.ai.openaiToken,
-      setToken: (v) => { this.plugin.settings.ai.openaiToken = v; },
-      buildProvider: () =>
-        new OpenAIProvider({
-          token: this.plugin.settings.ai.openaiToken,
-          model: this.plugin.settings.ai.openaiModel,
-        }),
-    });
+    card.createDiv({ cls: "ghs-field-hint", text: t.aiProvidersDesc });
+    if (entries.length === 0) {
+      card.createDiv({ cls: "ghs-field-hint", text: t.aiNoProviders });
+    }
+    entries.forEach((entry, i) => this.renderProviderEntry(card, entry, i));
 
-    this.renderAIProviderRow(card, {
-      label: t.geminiLabel,
-      placeholder: "AIza…",
-      getToken: () => this.plugin.settings.ai.geminiToken,
-      setToken: (v) => { this.plugin.settings.ai.geminiToken = v; },
-      buildProvider: () =>
-        new GeminiProvider({
-          token: this.plugin.settings.ai.geminiToken,
-          model: this.plugin.settings.ai.geminiModel,
-        }),
-    });
-
-    this.renderAIProviderRow(card, {
-      label: t.claudeLabel,
-      placeholder: "sk-ant-…",
-      getToken: () => this.plugin.settings.ai.claudeToken,
-      setToken: (v) => { this.plugin.settings.ai.claudeToken = v; },
-      buildProvider: () =>
-        new ClaudeProvider({
-          token: this.plugin.settings.ai.claudeToken,
-          model: this.plugin.settings.ai.claudeModel,
-        }),
-    });
-
-    this.renderAIProviderRow(card, {
-      label: t.deepseekLabel,
-      placeholder: "sk-…",
-      getToken: () => this.plugin.settings.ai.deepseekToken,
-      setToken: (v) => { this.plugin.settings.ai.deepseekToken = v; },
-      buildProvider: () =>
-        new DeepSeekProvider({
-          token: this.plugin.settings.ai.deepseekToken,
-          model: this.plugin.settings.ai.deepseekModel,
-        }),
-    });
+    // Add-provider dropdown: every pi-supported provider not yet configured,
+    // plus one user-defined OpenAI-compatible endpoint.
+    const available = PROVIDER_CATALOG.filter(
+      (c) => !entries.some((e) => e.provider === c.id),
+    );
+    const hasCustom = entries.some((e) => e.provider === CUSTOM_PROVIDER_ID);
+    if (available.length > 0 || !hasCustom) {
+      new Setting(card).setName(t.aiAddProvider).addDropdown((dd) => {
+        dd.addOption("", "—");
+        for (const c of available) dd.addOption(c.id, c.name);
+        if (!hasCustom) dd.addOption(CUSTOM_PROVIDER_ID, t.aiCustomProvider);
+        dd.onChange(async (v) => {
+          if (!v) return;
+          entries.push({ provider: v, token: "", model: "", baseUrl: "" });
+          await this.plugin.saveSettings();
+          this.display();
+        });
+      });
+    }
   }
 
   /**
-   * Render one AI provider row: eye toggle, password input, Test button.
-   * The status badge below holds the test result so the user can see
-   * which provider's check passed/failed without a Notice toast disappearing.
+   * One configured provider: token (masked) + model override + test /
+   * reorder / remove. Custom entries get an extra row for label + base URL.
    */
-  private renderAIProviderRow(
-    card: HTMLElement,
-    opts: {
-      label: string;
-      placeholder: string;
-      getToken: () => string;
-      setToken: (v: string) => void;
-      buildProvider: () => AIProvider;
-    },
-  ): void {
+  private renderProviderEntry(card: HTMLElement, entry: AIProviderEntry, index: number): void {
     const t = L().settings;
+    const entries = this.plugin.settings.ai.providers;
+    const cat = catalogEntry(entry.provider);
+    const isCustom = entry.provider === CUSTOM_PROVIDER_ID;
+    const name = isCustom ? entry.label?.trim() || t.aiCustomProvider : cat?.name ?? entry.provider;
+
     let inputEl: HTMLInputElement | null = null;
     const badge = createDiv("ghs-inline-badge ghs-ai-test-badge");
     badge.addClass("ghs-hidden");
 
-    const keySetting = new Setting(card)
-      .setName(opts.label)
+    const swap = async (from: number, to: number) => {
+      if (to < 0 || to >= entries.length) return;
+      [entries[from], entries[to]] = [entries[to], entries[from]];
+      await this.plugin.saveSettings();
+      this.display();
+    };
+
+    const row = new Setting(card)
+      .setName(name)
+      .setDesc(isCustom ? entry.baseUrl || t.aiBaseUrlPlaceholder : cat?.baseUrl ?? "")
       .addExtraButton((b) =>
         b.setIcon("eye").setTooltip(t.tokenShowHide).onClick(() => {
           if (!inputEl) return;
@@ -902,23 +939,81 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
         inputEl = text.inputEl;
         text.inputEl.type = "password";
         text
-          .setPlaceholder(opts.placeholder)
-          .setValue(opts.getToken())
+          .setPlaceholder(cat?.keyPlaceholder ?? "API key")
+          .setValue(entry.token)
           .onChange(async (v) => {
-            opts.setToken(v.trim());
+            entry.token = v.trim();
             await this.plugin.saveSettings();
-            // Stale badge from a previous test would be misleading now.
             badge.empty();
             badge.addClass("ghs-hidden");
+          });
+      })
+      .addText((text) => {
+        text.inputEl.addClass("ghs-model-input");
+        text
+          .setPlaceholder(cat?.defaultModel || t.aiModelLabel)
+          .setValue(entry.model)
+          .onChange(async (v) => {
+            entry.model = v.trim();
+            await this.plugin.saveSettings();
           });
       })
       .addExtraButton((b) =>
         b.setIcon("plug-zap")
           .setTooltip(L().common.test)
-          .onClick(() => this.runAITest(opts.buildProvider, badge))
+          .onClick(() => {
+            const provider = buildSuggestProvider(entry);
+            if (!provider) {
+              badge.empty();
+              badge.removeClass("ghs-hidden", "valid", "loading");
+              badge.addClass("invalid");
+              setIcon(badge.createSpan(), "alert-circle");
+              badge.createSpan({ text: t.aiEntryIncomplete });
+              return;
+            }
+            void this.runAITest(() => provider, badge);
+          })
+      )
+      .addExtraButton((b) =>
+        b.setIcon("arrow-up").setTooltip(t.aiMoveUp).onClick(() => void swap(index, index - 1))
+      )
+      .addExtraButton((b) =>
+        b.setIcon("arrow-down").setTooltip(t.aiMoveDown).onClick(() => void swap(index, index + 1))
+      )
+      .addExtraButton((b) =>
+        b.setIcon("trash-2").setTooltip(t.aiRemoveProvider).onClick(async () => {
+          entries.splice(index, 1);
+          await this.plugin.saveSettings();
+          this.display();
+        })
       );
-    keySetting.settingEl.addClass("ghs-key-row");
+    row.settingEl.addClass("ghs-key-row");
     card.appendChild(badge);
+
+    if (isCustom) {
+      new Setting(card)
+        .setName(t.aiCustomEndpoint)
+        .setDesc(t.aiCustomEndpointDesc)
+        .addText((text) => {
+          text
+            .setPlaceholder(t.aiCustomLabelPlaceholder)
+            .setValue(entry.label ?? "")
+            .onChange(async (v) => {
+              entry.label = v.trim();
+              await this.plugin.saveSettings();
+            });
+        })
+        .addText((text) => {
+          text.inputEl.addClass("ghs-baseurl-input");
+          text
+            .setPlaceholder(t.aiBaseUrlPlaceholder)
+            .setValue(entry.baseUrl)
+            .onChange(async (v) => {
+              entry.baseUrl = v.trim();
+              await this.plugin.saveSettings();
+            });
+        });
+    }
   }
 
   private async runAITest(

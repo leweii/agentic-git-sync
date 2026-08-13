@@ -24,6 +24,8 @@ export interface GeminiConfig {
   model?: string;
   maxTokens?: number;
   temperature?: number;
+  /** URL prefix, e.g. "https://generativelanguage.googleapis.com/v1beta". */
+  baseUrl?: string;
 }
 
 export class GeminiProvider implements AIProvider {
@@ -34,7 +36,10 @@ export class GeminiProvider implements AIProvider {
   private maxTokens: number;
   private temperature: number;
 
+  private baseUrl: string;
+
   constructor(private cfg: GeminiConfig) {
+    this.baseUrl = cfg.baseUrl ?? "https://generativelanguage.googleapis.com/v1beta";
     this.model = cfg.model ?? "gemini-2.5-flash";
     this.maxTokens = cfg.maxTokens ?? 4096;
     this.temperature = cfg.temperature ?? 0.2;
@@ -46,7 +51,7 @@ export class GeminiProvider implements AIProvider {
 
   async suggest(req: AISuggestionRequest): Promise<AISuggestion> {
     const userPrompt = buildPrompt(req);
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    const url = `${this.baseUrl}/models/${encodeURIComponent(
       this.model
     )}:generateContent?key=${encodeURIComponent(this.cfg.token)}`;
 
@@ -93,7 +98,7 @@ export class GeminiProvider implements AIProvider {
   }
 
   async complete(system: string, user: string): Promise<string> {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    const url = `${this.baseUrl}/models/${encodeURIComponent(
       this.model
     )}:generateContent?key=${encodeURIComponent(this.cfg.token)}`;
 

@@ -24,11 +24,14 @@ export interface ClaudeConfig {
   maxTokens?: number;
   temperature?: number;
   baseUrl?: string;
+  /** Override id/name when serving another Anthropic-compatible provider. */
+  id?: string;
+  name?: string;
 }
 
 export class ClaudeProvider implements AIProvider {
-  readonly id = "claude";
-  readonly name = "Claude";
+  readonly id: string;
+  readonly name: string;
 
   private model: string;
   private maxTokens: number;
@@ -36,6 +39,8 @@ export class ClaudeProvider implements AIProvider {
   private baseUrl: string;
 
   constructor(private cfg: ClaudeConfig) {
+    this.id = cfg.id ?? "claude";
+    this.name = cfg.name ?? "Claude";
     this.model = cfg.model ?? "claude-sonnet-4-5";
     this.maxTokens = cfg.maxTokens ?? 4096;
     this.temperature = cfg.temperature ?? 0.2;
@@ -63,7 +68,7 @@ export class ClaudeProvider implements AIProvider {
     });
 
     if (res.status !== 200) {
-      throw new Error(`Claude HTTP ${res.status} — ${truncate(res.text, 200)}`);
+      throw new Error(`${this.name} HTTP ${res.status} — ${truncate(res.text, 200)}`);
     }
 
     const body = res.json as ClaudeMessagesResponse | null;
@@ -73,7 +78,7 @@ export class ClaudeProvider implements AIProvider {
     const parsed = parseAIResponse(content);
     const inputTokens = Number(body?.usage?.input_tokens ?? 0);
     const outputTokens = Number(body?.usage?.output_tokens ?? 0);
-    const price = PRICING[this.model] ?? PRICING["claude-sonnet-4-5"];
+    const price = PRICING[this.model] ?? (this.id === "claude" ? PRICING["claude-sonnet-4-5"] : { in: 0, out: 0 });
 
     return {
       ...parsed,
@@ -106,7 +111,7 @@ export class ClaudeProvider implements AIProvider {
     });
 
     if (res.status !== 200) {
-      throw new Error(`Claude HTTP ${res.status} — ${truncate(res.text, 200)}`);
+      throw new Error(`${this.name} HTTP ${res.status} — ${truncate(res.text, 200)}`);
     }
 
     const body = res.json as ClaudeMessagesResponse | null;

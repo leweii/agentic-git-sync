@@ -42,10 +42,19 @@ export interface ToolCallBackend {
   chat(req: BackendChatRequest): Promise<AssistantMessage>;
 }
 
+/**
+ * Fully-resolved backend config. Resolution (catalog defaults, custom
+ * overrides) happens in providerFactory.ts — backends never guess URLs.
+ * `baseUrl` is the catalog-convention prefix: openai-compat appends
+ * "/chat/completions", anthropic appends "/v1/messages", gemini appends
+ * "/models/{model}:generateContent".
+ */
 export interface BackendConfig {
+  id: string;
+  name: string;
   token: string;
-  model?: string;
-  baseUrl?: string;
+  model: string;
+  baseUrl: string;
 }
 
 const DEFAULT_MAX_TOKENS = 1024;
@@ -92,14 +101,17 @@ interface AnthropicBlock {
 }
 
 export class AnthropicBackend implements ToolCallBackend {
-  readonly id = "claude";
-  readonly name = "Claude";
+  readonly id: string;
+  readonly name: string;
   private model: string;
   private baseUrl: string;
 
+  // Also serves Anthropic-compatible endpoints (MiniMax) via cfg.baseUrl.
   constructor(private cfg: BackendConfig) {
-    this.model = cfg.model ?? "claude-sonnet-4-5";
-    this.baseUrl = cfg.baseUrl ?? "https://api.anthropic.com";
+    this.id = cfg.id;
+    this.name = cfg.name;
+    this.model = cfg.model;
+    this.baseUrl = cfg.baseUrl;
   }
 
   isAvailable(): boolean {
@@ -161,7 +173,7 @@ export class AnthropicBackend implements ToolCallBackend {
       throw: false,
     });
     if (res.status !== 200) {
-      throw new Error(`Claude HTTP ${res.status} — ${truncate(res.text, 200)}`);
+      throw new Error(`${this.name} HTTP ${res.status} — ${truncate(res.text, 200)}`);
     }
 
     const body = res.json as {
@@ -188,7 +200,7 @@ export class AnthropicBackend implements ToolCallBackend {
       role: "assistant",
       content,
       api: "anthropic-messages",
-      provider: "anthropic",
+      provider: this.id,
       model: this.model,
       usage: zeroUsage(Number(body?.usage?.input_tokens ?? 0), Number(body?.usage?.output_tokens ?? 0)),
       stopReason: content.some((c) => c.type === "toolCall")
@@ -210,15 +222,16 @@ interface OpenAIToolCall {
 }
 
 export class OpenAICompatBackend implements ToolCallBackend {
-  constructor(
-    readonly id: string,
-    readonly name: string,
-    private cfg: BackendConfig,
-    private defaults: { model: string; baseUrl: string },
-  ) {}
+  readonly id: string;
+  readonly name: string;
+  private model: string;
+  private baseUrl: string;
 
-  private get model(): string {
-    return this.cfg.model ?? this.defaults.model;
+  constructor(private cfg: BackendConfig) {
+    this.id = cfg.id;
+    this.name = cfg.name;
+    this.model = cfg.model;
+    this.baseUrl = cfg.baseUrl;
   }
 
   isAvailable(): boolean {
@@ -252,9 +265,8 @@ export class OpenAICompatBackend implements ToolCallBackend {
       }
     }
 
-    const baseUrl = this.cfg.baseUrl ?? this.defaults.baseUrl;
     const res = await requestUrl({
-      url: `${baseUrl}/v1/chat/completions`,
+      url: `${this.baseUrl}/chat/completions`,
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -343,12 +355,16 @@ function geminiSchema(schema: unknown): unknown {
 }
 
 export class GeminiBackend implements ToolCallBackend {
-  readonly id = "gemini";
-  readonly name = "Google Gemini";
+  readonly id: string;
+  readonly name: string;
   private model: string;
+  private baseUrl: string;
 
   constructor(private cfg: BackendConfig) {
-    this.model = cfg.model ?? "gemini-2.5-flash";
+    this.id = cfg.id;
+    this.name = cfg.name;
+    this.model = cfg.model;
+    this.baseUrl = cfg.baseUrl;
   }
 
   isAvailable(): boolean {
@@ -384,7 +400,7 @@ export class GeminiBackend implements ToolCallBackend {
       }
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    const url = `${this.baseUrl}/models/${encodeURIComponent(
       this.model,
     )}:generateContent?key=${encodeURIComponent(this.cfg.token)}`;
     const res = await requestUrl({
@@ -415,7 +431,7 @@ export class GeminiBackend implements ToolCallBackend {
       throw: false,
     });
     if (res.status !== 200) {
-      throw new Error(`Gemini HTTP ${res.status} — ${truncate(res.text, 200)}`);
+      throw new Error(`${this.name} HTTP ${res.status} — ${truncate(res.text, 200)}`);
     }
 
     const body = res.json as {
@@ -444,7 +460,7 @@ export class GeminiBackend implements ToolCallBackend {
       role: "assistant",
       content,
       api: "google-generative-ai",
-      provider: "google",
+      provider: this.id,
       model: this.model,
       usage: zeroUsage(
         Number(body?.usageMetadata?.promptTokenCount ?? 0),

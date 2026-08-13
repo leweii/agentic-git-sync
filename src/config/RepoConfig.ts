@@ -17,6 +17,13 @@ export interface RepoConfigSubmoduleV1 {
   upstreamBranch?: string;
 }
 
+export interface RepoConfigProviderV1 {
+  provider: string;
+  model: string;
+  baseUrl?: string;
+  label?: string;
+}
+
 export interface RepoConfigV1 {
   version: 1;
   remote: string;
@@ -29,6 +36,12 @@ export interface RepoConfigV1 {
     enabled: boolean;
     silentMode: boolean;
     silentMinConfidence: number;
+    /**
+     * Configured providers (structure only — tokens never enter this file;
+     * they live in the per-device secret store). Added in 1.5; older files
+     * without it fall back to the legacy per-provider model fields below.
+     */
+    providers: RepoConfigProviderV1[];
     openaiModel: string;
     geminiModel: string;
     claudeModel: string;
@@ -66,6 +79,19 @@ export function parseRepoConfig(raw: unknown): RepoConfigV1 | null {
       silentMode: typeof ai.silentMode === "boolean" ? ai.silentMode : false,
       silentMinConfidence:
         typeof ai.silentMinConfidence === "number" ? ai.silentMinConfidence : 3,
+      providers: Array.isArray(ai.providers)
+        ? (ai.providers as unknown[])
+            .map((p) => {
+              const pp = (p ?? {}) as Record<string, unknown>;
+              return {
+                provider: typeof pp.provider === "string" ? pp.provider : "",
+                model: typeof pp.model === "string" ? pp.model : "",
+                ...(typeof pp.baseUrl === "string" && pp.baseUrl ? { baseUrl: pp.baseUrl } : {}),
+                ...(typeof pp.label === "string" && pp.label ? { label: pp.label } : {}),
+              };
+            })
+            .filter((p) => p.provider)
+        : [],
       openaiModel: typeof ai.openaiModel === "string" ? ai.openaiModel : "gpt-5.5",
       geminiModel: typeof ai.geminiModel === "string" ? ai.geminiModel : "gemini-2.5-flash",
       claudeModel: typeof ai.claudeModel === "string" ? ai.claudeModel : "claude-sonnet-4-5",
@@ -115,10 +141,18 @@ export function settingsToRepoConfig(s: GitHubSyncSettings): RepoConfigV1 {
       enabled: s.ai.enabled,
       silentMode: s.ai.silentMode,
       silentMinConfidence: 6 - s.ai.silentAutonomyLevel,
-      openaiModel: s.ai.openaiModel,
-      geminiModel: s.ai.geminiModel,
-      claudeModel: s.ai.claudeModel,
-      deepseekModel: s.ai.deepseekModel,
+      providers: (s.ai.providers ?? []).map((p) => ({
+        provider: p.provider,
+        model: p.model,
+        ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}),
+        ...(p.label ? { label: p.label } : {}),
+      })),
+      // Legacy mirrors so pre-1.5 plugin versions sharing this repo file
+      // still see their per-provider model overrides.
+      openaiModel: s.ai.providers?.find((p) => p.provider === "openai")?.model || "gpt-5.5",
+      geminiModel: s.ai.providers?.find((p) => p.provider === "google")?.model || "gemini-2.5-flash",
+      claudeModel: s.ai.providers?.find((p) => p.provider === "anthropic")?.model || "claude-sonnet-4-5",
+      deepseekModel: s.ai.providers?.find((p) => p.provider === "deepseek")?.model || "deepseek-chat",
       sendFilePaths: s.ai.sendFilePaths,
       sendGitMetadata: s.ai.sendGitMetadata,
       sendSurroundingContext: s.ai.sendSurroundingContext,
@@ -153,6 +187,17 @@ export function applyRepoConfig(
       enabled: cfg.ai.enabled,
       silentMode: cfg.ai.silentMode,
       silentAutonomyLevel: 6 - cfg.ai.silentMinConfidence,
+      // Structural provider list from the repo file; tokens are local-only,
+      // so carry them over from the matching existing entries.
+      providers: cfg.ai.providers.length > 0
+        ? cfg.ai.providers.map((p) => ({
+            provider: p.provider,
+            model: p.model,
+            baseUrl: p.baseUrl ?? "",
+            ...(p.label ? { label: p.label } : {}),
+            token: s.ai.providers?.find((e) => e.provider === p.provider)?.token ?? "",
+          }))
+        : s.ai.providers ?? [],
       openaiModel: cfg.ai.openaiModel,
       geminiModel: cfg.ai.geminiModel,
       claudeModel: cfg.ai.claudeModel,
