@@ -21,7 +21,7 @@ import { AppAuth } from "./auth/AppAuth";
 import { PROTOCOL_ACTION } from "./auth/constants";
 import { AIClient } from "./ai/AIClient";
 import type { AIProvider } from "./ai/AIProvider";
-import { buildBackends, buildSuggestProviders } from "./ai/providerFactory";
+import { activeEntries, buildBackends, buildSuggestProviders } from "./ai/providerFactory";
 import type { ToolCallBackend } from "./ai/piBackends";
 import { AutoResolver } from "./sync/AutoResolver";
 import type { ConflictRepoOps } from "./sync/ConflictRepoOps";
@@ -612,7 +612,8 @@ export default class GitHubSyncPlugin extends Plugin {
    * that must respect it; AIClient enforces it internally.
    */
   private providerList(): AIProvider[] {
-    return buildSuggestProviders(this.settings.ai.providers ?? []);
+    const ai = this.settings.ai;
+    return buildSuggestProviders(activeEntries(ai.providers ?? [], ai.activeProvider));
   }
 
   private buildAIProviders(): AIProvider[] {
@@ -632,8 +633,9 @@ export default class GitHubSyncPlugin extends Plugin {
    * switch for the same reason as buildAIProviders.
    */
   private buildAgentBackends(): ToolCallBackend[] {
-    if (!this.settings.ai.enabled) return [];
-    return buildBackends(this.settings.ai.providers ?? []);
+    const ai = this.settings.ai;
+    if (!ai.enabled) return [];
+    return buildBackends(activeEntries(ai.providers ?? [], ai.activeProvider));
   }
 
   reinitGit(): void {
@@ -1238,7 +1240,7 @@ export default class GitHubSyncPlugin extends Plugin {
       sendGitMetadata: ai.sendGitMetadata,
       sendSurroundingContext: ai.sendSurroundingContext,
       excludePatterns: ai.excludePatterns,
-    });
+    }, ai.mergeInstructions);
   }
 
   private async openLocalChanges(): Promise<void> {

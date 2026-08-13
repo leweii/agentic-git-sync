@@ -42,11 +42,20 @@ export interface AISettings {
   silentMode: boolean;
   silentAutonomyLevel: number;
   /**
-   * Configured providers in failover preference order (providerCatalog.ts
-   * lists what's available). Tokens hydrate from the per-device secret
-   * store; data.json and .github-sync.json only carry the structure.
+   * Every provider the user has ever configured (providerCatalog.ts lists
+   * what's available). Only `activeProvider` is used at runtime — the rest
+   * stay so switching providers restores the previously entered key.
+   * Tokens hydrate from the per-device secret store; data.json and
+   * .github-sync.json only carry the structure.
    */
   providers: AIProviderEntry[];
+  /** Provider id (or "custom") the plugin actually calls. */
+  activeProvider: string;
+  /**
+   * Optional user/team rules appended to the conflict-merge prompt —
+   * e.g. "when versions disagree about facts, mark unresolvable".
+   */
+  mergeInstructions: string;
   // Legacy per-provider fields (pre-1.5). Still read from old data.json /
   // secret files, migrated into `providers` by migrateLegacyProviders(),
   // then kept empty. Do not add UI for these.
@@ -160,10 +169,11 @@ const STALE_MODEL_REPLACEMENTS: Record<string, string> = {
   "gpt-4o-mini":         "gpt-5.5",
   "gpt-4.1-mini":        "gpt-5.5",
   "gpt-4.1-nano":        "gpt-5.5",
-  // `deepseek-v4-flash` was the placeholder default in early builds but
-  // never existed on the DeepSeek API — requests 400 on "unknown model".
-  // Roll forward to the documented chat alias.
-  "deepseek-v4-flash":   "deepseek-chat",
+  // Sunset chat-era defaults. Empty string means "use the provider's
+  // current catalog default" (resolveProvider falls back to it).
+  "deepseek-chat":       "",
+  "deepseek-coder":      "",
+  "gpt-5.5":             "",
 };
 
 export function migrateStaleModels(ai: AISettings): AISettings {
@@ -219,9 +229,15 @@ export function migrateLegacyProviders(ai: AISettings): AISettings {
       providers.push({ provider: l.id, token: l.token, model: l.model ?? "", baseUrl: "" });
     }
   }
+  const activeProvider =
+    typeof ai.activeProvider === "string" &&
+    providers.some((p) => p.provider === ai.activeProvider)
+      ? ai.activeProvider
+      : providers[0]?.provider ?? "";
   return {
     ...ai,
     providers,
+    activeProvider,
     openaiToken: "",
     geminiToken: "",
     claudeToken: "",
@@ -261,6 +277,8 @@ export const DEFAULT_SETTINGS: GitHubSyncSettings = {
     silentMode: false,
     silentAutonomyLevel: 3,
     providers: [],
+    activeProvider: "",
+    mergeInstructions: "",
     openaiToken: "",
     openaiModel: "gpt-5.5",
     geminiToken: "",
@@ -325,7 +343,7 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
   private renderSilentHero(parent: HTMLElement): void {
     const t = L().settings;
     const ai = this.plugin.settings.ai;
-    const hasKey = !!(ai.openaiToken || ai.geminiToken || ai.claudeToken || ai.deepseekToken);
+    const hasKey = !!ai.providers.find((p) => p.provider === ai.activeProvider)?.token;
 
     const hero = parent.createDiv("ghs-silent-hero");
     if (ai.silentMode) hero.addClass("is-active");
@@ -358,7 +376,7 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
     const handleToggle = async () => {
       const nextOn = toggleInput.checked;
       const a = this.plugin.settings.ai;
-      const currentHasKey = !!(a.openaiToken || a.geminiToken || a.claudeToken || a.deepseekToken);
+      const currentHasKey = !!a.providers.find((p) => p.provider === a.activeProvider)?.token;
       if (nextOn && !currentHasKey) {
         // Revert visually until user finishes the setup modal
         toggleInput.checked = false;
@@ -874,61 +892,41 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
 
   private renderAI(parent: HTMLElement): void {
     const t = L().settings;
-    const card = this.sectionHeader(parent, t.sectionAI);
-    const entries = this.plugin.settings.ai.providers;
+    const card = this.sectionHeader(parent, t.aiEngineHeading);
+    const ai = this.plugin.settings.ai;
+    const active = ai.providers.find((p) => p.provider === ai.activeProvider);
 
-    card.createDiv({ cls: "ghs-field-hint", text: t.aiProvidersDesc });
-    if (entries.length === 0) {
-      card.createDiv({ cls: "ghs-field-hint", text: t.aiNoProviders });
-    }
-    entries.forEach((entry, i) => this.renderProviderEntry(card, entry, i));
-
-    // Add-provider dropdown: every pi-supported provider not yet configured,
-    // plus one user-defined OpenAI-compatible endpoint.
-    const available = PROVIDER_CATALOG.filter(
-      (c) => !entries.some((e) => e.provider === c.id),
-    );
-    const hasCustom = entries.some((e) => e.provider === CUSTOM_PROVIDER_ID);
-    if (available.length > 0 || !hasCustom) {
-      new Setting(card).setName(t.aiAddProvider).addDropdown((dd) => {
+    // Provider picker. Switching keeps every previously entered key in the
+    // providers array (and the per-device secret store), so users can flip
+    // between providers without re-pasting credentials.
+    new Setting(card)
+      .setName(t.aiProviderLabel)
+      .addDropdown((dd) => {
         dd.addOption("", "—");
-        for (const c of available) dd.addOption(c.id, c.name);
-        if (!hasCustom) dd.addOption(CUSTOM_PROVIDER_ID, t.aiCustomProvider);
+        for (const c of PROVIDER_CATALOG) dd.addOption(c.id, c.name);
+        dd.addOption(CUSTOM_PROVIDER_ID, t.aiCustomProvider);
+        dd.setValue(ai.activeProvider || "");
         dd.onChange(async (v) => {
-          if (!v) return;
-          entries.push({ provider: v, token: "", model: "", baseUrl: "" });
+          ai.activeProvider = v;
+          if (v && !ai.providers.find((p) => p.provider === v)) {
+            ai.providers.push({ provider: v, token: "", model: "", baseUrl: "" });
+          }
           await this.plugin.saveSettings();
           this.display();
         });
       });
-    }
-  }
 
-  /**
-   * One configured provider: token (masked) + model override + test /
-   * reorder / remove. Custom entries get an extra row for label + base URL.
-   */
-  private renderProviderEntry(card: HTMLElement, entry: AIProviderEntry, index: number): void {
-    const t = L().settings;
-    const entries = this.plugin.settings.ai.providers;
-    const cat = catalogEntry(entry.provider);
-    const isCustom = entry.provider === CUSTOM_PROVIDER_ID;
-    const name = isCustom ? entry.label?.trim() || t.aiCustomProvider : cat?.name ?? entry.provider;
+    if (!active) return;
+    const cat = catalogEntry(active.provider);
+    const isCustom = active.provider === CUSTOM_PROVIDER_ID;
 
+    // API key.
     let inputEl: HTMLInputElement | null = null;
     const badge = createDiv("ghs-inline-badge ghs-ai-test-badge");
     badge.addClass("ghs-hidden");
-
-    const swap = async (from: number, to: number) => {
-      if (to < 0 || to >= entries.length) return;
-      [entries[from], entries[to]] = [entries[to], entries[from]];
-      await this.plugin.saveSettings();
-      this.display();
-    };
-
-    const row = new Setting(card)
-      .setName(name)
-      .setDesc(isCustom ? entry.baseUrl || t.aiBaseUrlPlaceholder : cat?.baseUrl ?? "")
+    const keyRow = new Setting(card)
+      .setName(t.aiApiKeyLabel)
+      .setDesc(t.aiApiKeyDesc)
       .addExtraButton((b) =>
         b.setIcon("eye").setTooltip(t.tokenShowHide).onClick(() => {
           if (!inputEl) return;
@@ -940,29 +938,19 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
         text.inputEl.type = "password";
         text
           .setPlaceholder(cat?.keyPlaceholder ?? "API key")
-          .setValue(entry.token)
+          .setValue(active.token)
           .onChange(async (v) => {
-            entry.token = v.trim();
+            active.token = v.trim();
             await this.plugin.saveSettings();
             badge.empty();
             badge.addClass("ghs-hidden");
-          });
-      })
-      .addText((text) => {
-        text.inputEl.addClass("ghs-model-input");
-        text
-          .setPlaceholder(cat?.defaultModel || t.aiModelLabel)
-          .setValue(entry.model)
-          .onChange(async (v) => {
-            entry.model = v.trim();
-            await this.plugin.saveSettings();
           });
       })
       .addExtraButton((b) =>
         b.setIcon("plug-zap")
           .setTooltip(L().common.test)
           .onClick(() => {
-            const provider = buildSuggestProvider(entry);
+            const provider = buildSuggestProvider(active);
             if (!provider) {
               badge.empty();
               badge.removeClass("ghs-hidden", "valid", "loading");
@@ -973,21 +961,8 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
             }
             void this.runAITest(() => provider, badge);
           })
-      )
-      .addExtraButton((b) =>
-        b.setIcon("arrow-up").setTooltip(t.aiMoveUp).onClick(() => void swap(index, index - 1))
-      )
-      .addExtraButton((b) =>
-        b.setIcon("arrow-down").setTooltip(t.aiMoveDown).onClick(() => void swap(index, index + 1))
-      )
-      .addExtraButton((b) =>
-        b.setIcon("trash-2").setTooltip(t.aiRemoveProvider).onClick(async () => {
-          entries.splice(index, 1);
-          await this.plugin.saveSettings();
-          this.display();
-        })
       );
-    row.settingEl.addClass("ghs-key-row");
+    keyRow.settingEl.addClass("ghs-key-row");
     card.appendChild(badge);
 
     if (isCustom) {
@@ -997,9 +972,9 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
         .addText((text) => {
           text
             .setPlaceholder(t.aiCustomLabelPlaceholder)
-            .setValue(entry.label ?? "")
+            .setValue(active.label ?? "")
             .onChange(async (v) => {
-              entry.label = v.trim();
+              active.label = v.trim();
               await this.plugin.saveSettings();
             });
         })
@@ -1007,12 +982,57 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
           text.inputEl.addClass("ghs-baseurl-input");
           text
             .setPlaceholder(t.aiBaseUrlPlaceholder)
-            .setValue(entry.baseUrl)
+            .setValue(active.baseUrl)
             .onChange(async (v) => {
-              entry.baseUrl = v.trim();
+              active.baseUrl = v.trim();
               await this.plugin.saveSettings();
             });
         });
+    }
+
+    // Team/user rules injected into every conflict-merge prompt.
+    new Setting(card)
+      .setName(t.aiMergeInstructionsLabel)
+      .setDesc(t.aiMergeInstructionsDesc)
+      .addTextArea((text) => {
+        text.inputEl.addClass("ghs-merge-instructions");
+        text
+          .setPlaceholder(t.aiMergeInstructionsPlaceholder)
+          .setValue(ai.mergeInstructions)
+          .onChange(async (v) => {
+            ai.mergeInstructions = v;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    // Model: pi's current catalog for the provider (display names), free
+    // text for custom endpoints. A saved model that pi no longer lists
+    // falls back to the provider default instead of lingering in the UI.
+    const modelRow = new Setting(card).setName(t.aiModelLabel);
+    if (isCustom || !cat || cat.models.length === 0) {
+      modelRow.addText((text) => {
+        text.inputEl.addClass("ghs-model-input");
+        text
+          .setPlaceholder(cat?.defaultModel || t.aiModelLabel)
+          .setValue(active.model)
+          .onChange(async (v) => {
+            active.model = v.trim();
+            await this.plugin.saveSettings();
+          });
+      });
+    } else {
+      if (active.model && !cat.models.some((m) => m.id === active.model)) {
+        active.model = "";
+        void this.plugin.saveSettings();
+      }
+      modelRow.addDropdown((dd) => {
+        for (const m of cat.models) dd.addOption(m.id, m.name);
+        dd.setValue(active.model || cat.defaultModel);
+        dd.onChange(async (v) => {
+          active.model = v;
+          await this.plugin.saveSettings();
+        });
+      });
     }
   }
 

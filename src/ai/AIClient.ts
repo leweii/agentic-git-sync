@@ -21,7 +21,12 @@ export interface AISuggestError {
 }
 
 export class AIClient {
-  constructor(private providers: AIProvider[], private privacy: AIPrivacySettings) {}
+  constructor(
+    private providers: AIProvider[],
+    private privacy: AIPrivacySettings,
+    /** Optional user/team rules appended to every merge prompt. */
+    private mergeInstructions = "",
+  ) {}
 
   hasAnyProvider(): boolean {
     return this.providers.some((p) => p.isAvailable());
@@ -55,6 +60,7 @@ export class AIClient {
       filePath: this.privacy.sendFilePaths ? req.filePath : "",
       context: this.privacy.sendSurroundingContext ? req.context : undefined,
       gitMeta: this.privacy.sendGitMetadata ? req.gitMeta : undefined,
+      instructions: this.mergeInstructions.trim() || undefined,
     };
 
     const errors: { providerId: string; providerName: string; error: string }[] = [];

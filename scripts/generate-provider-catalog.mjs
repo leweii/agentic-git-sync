@@ -70,14 +70,6 @@ const INCLUDE = {
   "ant-ling": { kind: "openai-compat" },
 };
 
-/** Recovery runs are short tool-calling loops — prefer cheap, fast models. */
-const DEFAULT_MODEL_OVERRIDES = {
-  openai: "gpt-5.5",
-  anthropic: "claude-sonnet-4-5",
-  google: "gemini-2.5-flash",
-  deepseek: "deepseek-chat",
-};
-
 function parseProviderFile(id) {
   const file = path.join(providersDir, `${id}.js`);
   const src = fs.readFileSync(file, "utf8");
@@ -87,16 +79,41 @@ function parseProviderFile(id) {
   return { name, baseUrl };
 }
 
-/** Cheapest model by input cost — recovery loops don't need a flagship. */
-function defaultModelFor(id) {
-  if (DEFAULT_MODEL_OVERRIDES[id]) return DEFAULT_MODEL_OVERRIDES[id];
+function modelCatalogFor(id) {
   const dataFile = path.join(dataDir, `${id}.json`);
-  if (!fs.existsSync(dataFile)) return "";
+  if (!fs.existsSync(dataFile)) return [];
   const byApi = JSON.parse(fs.readFileSync(dataFile, "utf8"));
-  const models = Object.values(byApi).flatMap((m) => Object.values(m));
-  if (models.length === 0) return "";
-  models.sort((a, b) => (a.cost?.input ?? 0) - (b.cost?.input ?? 0) || a.id.localeCompare(b.id));
-  return models[0].id;
+  const seen = new Set();
+  const models = [];
+  for (const m of Object.values(byApi).flatMap((v) => Object.values(v))) {
+    if (seen.has(m.id)) continue;
+    seen.add(m.id);
+    models.push(m);
+  }
+  return models;
+}
+
+/**
+ * Preferred defaults for the majors — current fast-tier models. The
+ * generator asserts each override still exists in pi's model list, so a
+ * pi-ai upgrade that retires one fails the build instead of shipping a
+ * stale default (that's how "deepseek-chat" once lingered here).
+ */
+const DEFAULT_MODEL_OVERRIDES = {
+  openai: "gpt-5-mini",
+  google: "gemini-flash-latest", // rolling alias — tracks the current flash
+  anthropic: "claude-sonnet-5",
+};
+
+function defaultModelFor(id, models) {
+  const override = DEFAULT_MODEL_OVERRIDES[id];
+  if (override) {
+    if (!models.some((m) => m.id === override)) {
+      throw new Error(`default model override '${override}' for ${id} is not in pi's current model list — update DEFAULT_MODEL_OVERRIDES`);
+    }
+    return override;
+  }
+  return models[0]?.id ?? "";
 }
 
 const entries = [];
@@ -104,12 +121,15 @@ for (const [id, overrides] of Object.entries(INCLUDE)) {
   const parsed = parseProviderFile(id);
   const baseUrl = overrides.baseUrl ?? parsed.baseUrl;
   if (!baseUrl) throw new Error(`no baseUrl for ${id}`);
+  const models = modelCatalogFor(id);
   entries.push({
     id,
     name: parsed.name,
     kind: overrides.kind,
     baseUrl,
-    defaultModel: defaultModelFor(id),
+    defaultModel: defaultModelFor(id, models),
+    // pi's order preserved — current models first, display names for the UI.
+    models: models.map((m) => ({ id: m.id, name: m.name ?? m.id })),
     keyPlaceholder: overrides.keyPlaceholder ?? "API key",
   });
 }
@@ -127,6 +147,7 @@ const body = entries
     kind: ${JSON.stringify(e.kind)},
     baseUrl: ${JSON.stringify(e.baseUrl)},
     defaultModel: ${JSON.stringify(e.defaultModel)},
+    models: ${JSON.stringify(e.models)},
     keyPlaceholder: ${JSON.stringify(e.keyPlaceholder)},
   },`,
   )
@@ -152,8 +173,10 @@ export interface ProviderCatalogEntry {
    * anthropic → +"/v1/messages", gemini → +"/models/{model}:generateContent".
    */
   baseUrl: string;
-  /** Cheapest listed model — recovery loops prefer cheap and fast. */
+  /** pi's first listed model — the current sane default. */
   defaultModel: string;
+  /** Models pi currently lists for this provider, pi's order (dropdown options). */
+  models: Array<{ id: string; name: string }>;
   keyPlaceholder: string;
 }
 

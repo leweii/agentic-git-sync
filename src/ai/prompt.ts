@@ -59,6 +59,12 @@ export function buildPrompt(req: AISuggestionRequest): string {
     parts.push(req.context.after.join("\n"));
   }
 
+  if (req.instructions?.trim()) {
+    parts.push("");
+    parts.push("=== User merge rules (follow these over the default heuristics) ===");
+    parts.push(req.instructions.trim());
+  }
+
   parts.push("");
   parts.push("Resolve the conflict. Return JSON only.");
   return parts.join("\n");

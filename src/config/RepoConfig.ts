@@ -42,6 +42,10 @@ export interface RepoConfigV1 {
      * without it fall back to the legacy per-provider model fields below.
      */
     providers: RepoConfigProviderV1[];
+    /** Provider id the plugin actually calls (added 1.5.x). */
+    activeProvider: string;
+    /** Team rules appended to conflict-merge prompts (added 1.5.x). */
+    mergeInstructions: string;
     openaiModel: string;
     geminiModel: string;
     claudeModel: string;
@@ -92,6 +96,8 @@ export function parseRepoConfig(raw: unknown): RepoConfigV1 | null {
             })
             .filter((p) => p.provider)
         : [],
+      activeProvider: typeof ai.activeProvider === "string" ? ai.activeProvider : "",
+      mergeInstructions: typeof ai.mergeInstructions === "string" ? ai.mergeInstructions : "",
       openaiModel: typeof ai.openaiModel === "string" ? ai.openaiModel : "gpt-5.5",
       geminiModel: typeof ai.geminiModel === "string" ? ai.geminiModel : "gemini-2.5-flash",
       claudeModel: typeof ai.claudeModel === "string" ? ai.claudeModel : "claude-sonnet-4-5",
@@ -147,6 +153,8 @@ export function settingsToRepoConfig(s: GitHubSyncSettings): RepoConfigV1 {
         ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}),
         ...(p.label ? { label: p.label } : {}),
       })),
+      activeProvider: s.ai.activeProvider ?? "",
+      mergeInstructions: s.ai.mergeInstructions ?? "",
       // Legacy mirrors so pre-1.5 plugin versions sharing this repo file
       // still see their per-provider model overrides.
       openaiModel: s.ai.providers?.find((p) => p.provider === "openai")?.model || "gpt-5.5",
@@ -198,6 +206,8 @@ export function applyRepoConfig(
             token: s.ai.providers?.find((e) => e.provider === p.provider)?.token ?? "",
           }))
         : s.ai.providers ?? [],
+      activeProvider: cfg.ai.activeProvider || s.ai.activeProvider,
+      mergeInstructions: cfg.ai.mergeInstructions || s.ai.mergeInstructions,
       openaiModel: cfg.ai.openaiModel,
       geminiModel: cfg.ai.geminiModel,
       claudeModel: cfg.ai.claudeModel,

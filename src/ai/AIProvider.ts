@@ -4,6 +4,8 @@ export interface AISuggestionRequest {
   filePath: string;
   hunk: { local: string[]; remote: string[] };
   context?: { before: string[]; after: string[] };
+  /** Extra user/team merge rules, appended to the prompt verbatim. */
+  instructions?: string;
   gitMeta?: {
     localCommit?: string;
     remoteCommit?: string;

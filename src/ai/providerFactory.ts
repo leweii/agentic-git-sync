@@ -132,6 +132,18 @@ export function buildSuggestProvider(entry: AIProviderEntry): AIProvider | null 
   }
 }
 
+/**
+ * The single entry the runtime should use. The providers array keeps every
+ * key the user ever entered; only the active one is called.
+ */
+export function activeEntries(
+  entries: AIProviderEntry[],
+  activeProvider: string,
+): AIProviderEntry[] {
+  const active = entries.find((e) => e.provider === activeProvider);
+  return active ? [active] : [];
+}
+
 export function buildBackends(entries: AIProviderEntry[]): ToolCallBackend[] {
   return entries.map(buildBackend).filter((b): b is ToolCallBackend => b !== null);
 }
