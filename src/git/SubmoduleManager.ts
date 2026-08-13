@@ -8,7 +8,7 @@ import { GitManager, GitConflictError } from "./GitManager";
 import type { ProgressFn } from "./GitManager";
 import { ensureRemoteBranch, parseOwnerRepo } from "./githubApi";
 import type { TokenProvider } from "../auth/TokenProvider";
-import type { AIProvider } from "../ai/AIProvider";
+import type { ToolCallBackend } from "../ai/piBackends";
 import type { EventLog } from "../observability/EventLog";
 import { wrapGitWithLogging } from "./loggedGit";
 
@@ -28,7 +28,7 @@ export class SubmoduleManager {
     private email: string,
     private tokenProvider: TokenProvider,
     private configDir: string,
-    private providers: AIProvider[] = [],
+    private backends: ToolCallBackend[] = [],
     private eventLog: EventLog | null = null,
   ) {
     const raw = makeGit(vaultPath);
@@ -618,7 +618,7 @@ export class SubmoduleManager {
         this.email,
         this.tokenProvider,
         this.configDir,
-        this.providers,
+        this.backends,
         this.eventLog,
         config.id,
       );

@@ -15,28 +15,7 @@ import type { SimpleGit } from "simple-git";
 
 import { classifyByRules, GitErrorAgent } from "./GitErrorAgent";
 import { GitConflictError } from "./GitManager";
-import type { AIProvider, AISuggestion, AISuggestionRequest } from "../ai/AIProvider";
-
-// ---------------------------------------------------------------------------
-// Stubs
-// ---------------------------------------------------------------------------
-
-class StubProvider implements AIProvider {
-  readonly id = "stub";
-  readonly name = "Stub";
-  private responses: string[];
-  available = true;
-  callLog: { system: string; user: string }[] = [];
-
-  constructor(scripted: string[]) { this.responses = [...scripted]; }
-  isAvailable(): boolean { return this.available; }
-  async suggest(_req: AISuggestionRequest): Promise<AISuggestion> { throw new Error("not used"); }
-  async complete(system: string, user: string): Promise<string> {
-    this.callLog.push({ system, user });
-    if (this.responses.length === 0) throw new Error("script exhausted");
-    return this.responses.shift()!;
-  }
-}
+import { ScriptedBackend, toolCallMessage } from "../../test/scripted-backend";
 
 function stubGit(): { git: SimpleGit; calls: string[] } {
   const calls: string[] = [];
@@ -124,8 +103,8 @@ describe("GitErrorAgent.tryRecover dispatch", () => {
 
   it("clear_lock fast-paths without calling LLM", async () => {
     const { git } = stubGit();
-    const provider = new StubProvider([]); // would throw if called
-    const agent = new GitErrorAgent(git, vault, [provider]);
+    const backend = new ScriptedBackend([]); // would throw if called
+    const agent = new GitErrorAgent(git, vault, [backend]);
 
     const ok = await agent.tryRecover(
       new Error("fatal: Unable to create '.git/index.lock': File exists"),
@@ -133,26 +112,16 @@ describe("GitErrorAgent.tryRecover dispatch", () => {
       "main",
     );
     expect(ok).toBe(true);
-    expect(provider.callLog.length).toBe(0);
+    expect(backend.callLog.length).toBe(0);
   });
 
   it("non-lock error routes through ReAct (used to fast-path on confidence-4 rules)", async () => {
     const { git } = stubGit();
-    const provider = new StubProvider([
-      JSON.stringify({
-        thought: "abort the merge",
-        action: "git_exec",
-        params: { args: JSON.stringify(["merge", "--abort"]) },
-        confidence: 5,
-      }),
-      JSON.stringify({
-        thought: "done",
-        action: "finish",
-        params: { outcome: "ready_to_retry" },
-        confidence: 5,
-      }),
+    const backend = new ScriptedBackend([
+      toolCallMessage("git_exec", { args: ["merge", "--abort"], confidence: 5 }, "abort the merge"),
+      toolCallMessage("finish", { outcome: "ready_to_retry" }, "done"),
     ]);
-    const agent = new GitErrorAgent(git, vault, [provider]);
+    const agent = new GitErrorAgent(git, vault, [backend]);
 
     const ok = await agent.tryRecover(
       new Error("fatal: You have not concluded your merge (MERGE_HEAD exists)"),
@@ -160,15 +129,15 @@ describe("GitErrorAgent.tryRecover dispatch", () => {
       "main",
     );
     expect(ok).toBe(true);
-    expect(provider.callLog.length).toBe(2);
+    expect(backend.callLog.length).toBe(2);
   });
 
   it("ReAct gives_up → returns false (no rule fallback for confidence-0)", async () => {
     const { git } = stubGit();
-    const provider = new StubProvider([
-      JSON.stringify({ thought: "no idea", action: "finish", params: { outcome: "give_up" }, confidence: 1 }),
+    const backend = new ScriptedBackend([
+      toolCallMessage("finish", { outcome: "give_up" }, "no idea"),
     ]);
-    const agent = new GitErrorAgent(git, vault, [provider]);
+    const agent = new GitErrorAgent(git, vault, [backend]);
     const ok = await agent.tryRecover(
       new Error("fatal: something completely unexpected"),
       "sync",
@@ -190,27 +159,20 @@ describe("GitErrorAgent.tryRecover dispatch", () => {
 
   it("GitConflictError with modify/delete now routes through the agent (was previously bypassed)", async () => {
     const { git } = stubGit();
-    const provider = new StubProvider([
-      JSON.stringify({
-        thought: "modify/delete — take the delete",
-        action: "git_exec",
-        params: { args: JSON.stringify(["rm", "Cookbook Business KB README.md"]) },
-        confidence: 5,
-      }),
-      JSON.stringify({
-        thought: "commit the merge resolution",
-        action: "git_exec",
-        params: { args: JSON.stringify(["commit", "-m", "merge: resolve modify/delete"]) },
-        confidence: 5,
-      }),
-      JSON.stringify({
-        thought: "done",
-        action: "finish",
-        params: { outcome: "ready_to_retry" },
-        confidence: 5,
-      }),
+    const backend = new ScriptedBackend([
+      toolCallMessage(
+        "git_exec",
+        { args: ["rm", "Cookbook Business KB README.md"], confidence: 5 },
+        "modify/delete — take the delete",
+      ),
+      toolCallMessage(
+        "git_exec",
+        { args: ["commit", "-m", "merge: resolve modify/delete"], confidence: 5 },
+        "commit the merge resolution",
+      ),
+      toolCallMessage("finish", { outcome: "ready_to_retry" }, "done"),
     ]);
-    const agent = new GitErrorAgent(git, vault, [provider]);
+    const agent = new GitErrorAgent(git, vault, [backend]);
     const conflictErr = new GitConflictError(
       ["Cookbook Business KB README.md"],
       false,
@@ -219,22 +181,17 @@ describe("GitErrorAgent.tryRecover dispatch", () => {
     const ok = await agent.tryRecover(conflictErr, "sync", "jakob");
     expect(ok).toBe(true);
     // Three LLM calls — rm, commit, finish
-    expect(provider.callLog.length).toBe(3);
+    expect(backend.callLog.length).toBe(3);
     // The user prompt should include the CONFLICT (modify/delete) signal
-    expect(provider.callLog[0].user).toContain("modify/delete");
+    expect(backend.transcriptText(0)).toContain("modify/delete");
   });
 
   it("GitConflictError with content conflict — agent gives up, original error propagates", async () => {
     const { git } = stubGit();
-    const provider = new StubProvider([
-      JSON.stringify({
-        thought: "content conflict — ConflictModal handles this",
-        action: "finish",
-        params: { outcome: "give_up" },
-        confidence: 5,
-      }),
+    const backend = new ScriptedBackend([
+      toolCallMessage("finish", { outcome: "give_up" }, "content conflict — ConflictModal handles this"),
     ]);
-    const agent = new GitErrorAgent(git, vault, [provider]);
+    const agent = new GitErrorAgent(git, vault, [backend]);
     const conflictErr = new GitConflictError(
       ["notes/foo.md"],
       false,
@@ -242,7 +199,7 @@ describe("GitErrorAgent.tryRecover dispatch", () => {
     );
     const ok = await agent.tryRecover(conflictErr, "sync", "main");
     expect(ok).toBe(false);
-    expect(provider.callLog.length).toBe(1);
+    expect(backend.callLog.length).toBe(1);
   });
 
   it("no providers + lock error → still runs (fast path is LLM-independent)", async () => {

@@ -16,7 +16,7 @@
  */
 
 import type { SimpleGit } from "simple-git";
-import type { AIProvider } from "../ai/AIProvider";
+import type { ToolCallBackend } from "../ai/piBackends";
 import { RECOVERY_TOOLS, type RecoveryContext } from "./recoveryTools";
 import { GitReActAgent } from "./GitReActAgent";
 import { sanitizeSecrets, type EventLog } from "../observability/EventLog";
@@ -104,13 +104,13 @@ export class GitErrorAgent {
   constructor(
     private git: SimpleGit,
     private vaultPath: string,
-    providers: AIProvider[] = [],
+    backends: ToolCallBackend[] = [],
     private eventLog: EventLog | null = null,
     private repoId = "main",
     // Vault config dir (e.g. `.obsidian`); forwarded so traces land under it.
     private configDir = "",
   ) {
-    this.reactAgent = new GitReActAgent(git, vaultPath, providers, eventLog, repoId, configDir);
+    this.reactAgent = new GitReActAgent(git, vaultPath, backends, eventLog, repoId, configDir);
   }
 
   /**

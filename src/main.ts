@@ -25,6 +25,12 @@ import { GeminiProvider } from "./ai/GeminiProvider";
 import { ClaudeProvider } from "./ai/ClaudeProvider";
 import { DeepSeekProvider } from "./ai/DeepSeekProvider";
 import type { AIProvider } from "./ai/AIProvider";
+import {
+  AnthropicBackend,
+  GeminiBackend,
+  OpenAICompatBackend,
+  type ToolCallBackend,
+} from "./ai/piBackends";
 import { AutoResolver } from "./sync/AutoResolver";
 import type { ConflictRepoOps } from "./sync/ConflictRepoOps";
 import type { SubmoduleConfig } from "./settings";
@@ -583,7 +589,7 @@ export default class GitHubSyncPlugin extends Plugin {
 
   private initGit(vaultPath: string): void {
     const configDir = this.app.vault.configDir;
-    const providers = this.buildAIProviders();
+    const backends = this.buildAgentBackends();
     // Pass AppAuth itself — it delegates to the active provider, so a later
     // Connect (PAT → App) takes effect without rebuilding the managers.
     const tokenProvider = this.appAuth;
@@ -593,7 +599,7 @@ export default class GitHubSyncPlugin extends Plugin {
       this.settings.gitEmail,
       tokenProvider,
       configDir,
-      providers,
+      backends,
       this.eventLog,
       VAULT_REPO_ID,
     );
@@ -603,7 +609,7 @@ export default class GitHubSyncPlugin extends Plugin {
       this.settings.gitEmail,
       tokenProvider,
       configDir,
-      providers,
+      backends,
       this.eventLog,
     );
   }
@@ -638,6 +644,38 @@ export default class GitHubSyncPlugin extends Plugin {
     // not just no conflict suggestions.
     if (!this.settings.ai.enabled) return [];
     return this.providerList();
+  }
+
+  /**
+   * Native tool-calling backends for the pi-agent-core recovery loop, in the
+   * same preference order as providerList(). Separate from AIProvider (which
+   * serves single-turn conflict suggestions / PR summaries) because the agent
+   * needs real tool-call turns, not text completions. Respects the master AI
+   * switch for the same reason as buildAIProviders.
+   */
+  private buildAgentBackends(): ToolCallBackend[] {
+    if (!this.settings.ai.enabled) return [];
+    const ai = this.settings.ai;
+    const backends: ToolCallBackend[] = [];
+    if (ai.openaiToken) {
+      backends.push(new OpenAICompatBackend("openai", "OpenAI", {
+        token: ai.openaiToken,
+        model: ai.openaiModel,
+      }, { model: "gpt-5.5", baseUrl: "https://api.openai.com" }));
+    }
+    if (ai.geminiToken) {
+      backends.push(new GeminiBackend({ token: ai.geminiToken, model: ai.geminiModel }));
+    }
+    if (ai.claudeToken) {
+      backends.push(new AnthropicBackend({ token: ai.claudeToken, model: ai.claudeModel }));
+    }
+    if (ai.deepseekToken) {
+      backends.push(new OpenAICompatBackend("deepseek", "DeepSeek", {
+        token: ai.deepseekToken,
+        model: ai.deepseekModel,
+      }, { model: "deepseek-chat", baseUrl: "https://api.deepseek.com" }));
+    }
+    return backends;
   }
 
   reinitGit(): void {

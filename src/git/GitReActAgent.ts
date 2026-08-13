@@ -1,40 +1,48 @@
 /**
- * ReAct loop for git error recovery.
+ * Git error-recovery loop on pi-agent-core.
  *
- * Iterates Reason → Act → Observe up to `MAX_STEPS` times, choosing
- * observation tools (read-only) or recovery tools (write) at each step.
- * Code-level guardrails enforce the safety rules independently of the
- * prompt — the LLM is treated as an untrusted planner.
+ * The Agent from pi-agent-core owns the Reason → Act → Observe cycle with
+ * native tool calling; this class supplies the pieces around it:
+ *   - streamFn: provider fan-out over ToolCallBackends (Obsidian requestUrl,
+ *     per-call timeout, first available provider wins each step)
+ *   - beforeToolCall: the guardrails — the LLM is an untrusted planner, so
+ *     every safety rule is enforced in code independently of the prompt
+ *   - afterToolCall: secret-scrubbing + truncation of tool output before the
+ *     model or the persisted trace sees it
+ *   - shouldStopAfterTurn: step budget / finish / abort
  *
- * Trace JSON is persisted under
+ * Trace JSON (same ReactTrace shape as the pre-pi loop) is persisted under
  *   <vault>/.obsidian/plugins/agentic-git-sync/agent-traces/<iso>.json
  * with a rolling cap of TRACE_RETENTION files.
  */
 
 import type { SimpleGit } from "simple-git";
 import { fs, path } from "../node-builtins";
-import type { AIProvider } from "../ai/AIProvider";
+import { Agent } from "@earendil-works/pi-agent-core";
+import type {
+  BeforeToolCallContext,
+  BeforeToolCallResult,
+  AfterToolCallContext,
+  AfterToolCallResult,
+  StreamFn,
+} from "@earendil-works/pi-agent-core";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import type { Api, Context, Model, Usage } from "@earendil-works/pi-ai";
+import type { BackendChatRequest, ToolCallBackend } from "../ai/piBackends";
 import { sanitizeSecrets, type EventLog } from "../observability/EventLog";
 import {
   REACT_SYSTEM_PROMPT,
-  buildReactStepPrompt,
-  parseReactStep,
+  buildInitialPrompt,
   type ReactStep,
   type ReactTrace,
 } from "../ai/reactPrompt";
 import {
-  RECOVERY_TOOLS,
   DESTRUCTIVE_TOOLS,
   CATASTROPHIC_TOOLS,
   isRecoveryTool,
-  type RecoveryContext,
 } from "./recoveryTools";
-import {
-  OBSERVATION_TOOLS,
-  isObservationTool,
-  truncate,
-  type ObservationContext,
-} from "./observationTools";
+import { isObservationTool, truncate } from "./observationTools";
+import { buildAgentTools, type FinishOutcome } from "./agentTools";
 
 const MAX_STEPS = 5;
 const MAX_OBSERVATIONS_IN_A_ROW = 3;
@@ -106,7 +114,7 @@ function dangerousGitExec(
     return null; // executor rejects malformed args with its own message
   }
   if (!Array.isArray(args) || !args.every((a) => typeof a === "string")) return null;
-  const list = args as string[];
+  const list = args;
   const cmd = list.find((a) => !a.startsWith("-"));
   if (cmd === "reset" && list.includes("--hard")) {
     return {
@@ -135,33 +143,75 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   });
 }
 
+function emptyUsage(): Usage {
+  return {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+}
+
+/**
+ * Placeholder Model for pi's Agent state. Provider routing happens inside our
+ * streamFn (which fans out over the configured backends), so nothing reads
+ * these fields — pi just requires a model on the loop config.
+ */
+const RECOVERY_MODEL: Model<Api> = {
+  id: "agentic-git-sync-recovery",
+  name: "Agentic Git Sync recovery backends",
+  api: "anthropic-messages",
+  provider: "agentic-git-sync",
+  baseUrl: "",
+  reasoning: false,
+  input: ["text"],
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 128_000,
+  maxTokens: 1024,
+};
+
 export interface AgentBudgets {
   wallClockMs?: number;
   providerTimeoutMs?: number;
 }
 
+/** Per-run mutable state, so one GitReActAgent can serve sequential runs. */
+interface RunState {
+  initialError: string;
+  deadline: number;
+  steps: ReactStep[];
+  byToolCallId: Map<string, ReactStep>;
+  lastAssistantText: string;
+  blockedStreak: number;
+  finished?: { outcome: FinishOutcome; reason: string };
+  abort?: { outcome: ReactTrace["outcome"]; reason: string };
+  providerFailure?: string;
+}
+
 export class GitReActAgent {
-  private providers: AIProvider[];
+  private backends: ToolCallBackend[];
   private wallClockMs: number;
   private providerTimeoutMs: number;
 
   constructor(
     private git: SimpleGit,
     private vaultPath: string,
-    providers: AIProvider[] = [],
+    backends: ToolCallBackend[] = [],
     private eventLog: EventLog | null = null,
     private repoId = "main",
     // Vault config dir (e.g. `.obsidian`). Empty in tests, where traces aren't asserted.
     private configDir = "",
     budgets: AgentBudgets = {},
   ) {
-    this.providers = providers.filter((p) => p.isAvailable());
+    this.backends = backends.filter((b) => b.isAvailable());
     this.wallClockMs = budgets.wallClockMs ?? WALL_CLOCK_BUDGET_MS;
     this.providerTimeoutMs = budgets.providerTimeoutMs ?? PROVIDER_TIMEOUT_MS;
   }
 
   hasProvider(): boolean {
-    return this.providers.length > 0;
+    return this.backends.length > 0;
   }
 
   async run(
@@ -175,68 +225,61 @@ export class GitReActAgent {
     // agent can be constructed without an EventLog — sanitize here too.
     initialError = sanitizeSecrets(initialError);
     const startedAt = Date.now();
-    const deadline = startedAt + this.wallClockMs;
-    const trace: ReactStep[] = [];
-    let outcome: ReactTrace["outcome"] = "gave_up";
-    let reason = "no steps taken";
-    let blockedStreak = 0;
+    const run: RunState = {
+      initialError,
+      deadline: startedAt + this.wallClockMs,
+      steps: [],
+      byToolCallId: new Map(),
+      lastAssistantText: "",
+      blockedStreak: 0,
+    };
 
-    for (let i = 0; i < MAX_STEPS; i++) {
-      if (Date.now() > deadline) {
-        outcome = "guardrail_aborted";
-        reason = "wall-clock budget exceeded";
-        break;
-      }
+    const tools = buildAgentTools({
+      git: this.git,
+      vaultPath: this.vaultPath,
+      branch,
+      remoteUrl,
+      onFinish: (outcome, reason) => {
+        run.finished = { outcome, reason: sanitizeSecrets(reason) };
+      },
+    });
 
-      let step: ReactStep;
-      try {
-        step = await this.callModel(initialError, operation, branch, trace, deadline);
-      } catch (e) {
-        outcome = "gave_up";
-        reason = `all providers failed: ${(e as Error).message}`;
-        break;
-      }
+    const agent = new Agent({
+      initialState: {
+        systemPrompt: REACT_SYSTEM_PROMPT,
+        model: RECOVERY_MODEL,
+        tools,
+        thinkingLevel: "off",
+      },
+      streamFn: this.makeStreamFn(run),
+      // One tool at a time: guardrails reason about a linear trace, and a
+      // recovery step's outcome must be observed before the next mutation.
+      toolExecution: "sequential",
+      beforeToolCall: async (c) => this.beforeToolCall(run, c),
+      afterToolCall: async (c) => this.afterToolCall(c),
+      shouldStopAfterTurn: async () =>
+        !!run.finished || !!run.abort || run.steps.length >= MAX_STEPS,
+    });
 
-      // A blocked step is fed back as an observation so the model can correct
-      // course (it still consumes a step). Two blocks in a row mean it isn't
-      // reading the feedback — abort rather than burn the remaining budget.
-      const block = this.guardrail(step, trace, initialError);
-      if (block) {
-        blockedStreak++;
-        trace.push({ ...step, observation: `blocked: ${block}` });
-        this.logStep(i + 1, step, `blocked: ${block}`);
-        if (blockedStreak >= MAX_CONSECUTIVE_BLOCKS) {
-          outcome = "guardrail_aborted";
-          reason = block;
-          break;
-        }
-        continue;
-      }
-      blockedStreak = 0;
+    this.subscribeTraceRecorder(agent, run);
 
-      // Terminal action — record but do not execute.
-      if (step.action === "finish") {
-        const o = step.params.outcome === "ready_to_retry" ? "ready_to_retry" : "gave_up";
-        outcome = o;
-        reason = step.thought || "model chose to finish";
-        const finishObs = `finished with ${o}`;
-        trace.push({ ...step, observation: finishObs });
-        this.logStep(i + 1, step, finishObs);
-        break;
-      }
+    // The wall clock caps total loop time even if a backend ignores its
+    // per-call timeout. The abort surfaces as a normal loop exit.
+    const wallClockTimer = window.setTimeout(() => {
+      run.abort ??= { outcome: "guardrail_aborted", reason: "wall-clock budget exceeded" };
+      agent.abort();
+    }, this.wallClockMs);
 
-      // Execute the chosen tool. Observations can quote credential-bearing
-      // text (git error URLs, `git config --list` via git_exec) — sanitize
-      // before the model or the trace file sees them.
-      const observation = sanitizeSecrets(await this.executeTool(step, branch, remoteUrl));
-      trace.push({ ...step, observation });
-      this.logStep(i + 1, step, observation);
+    try {
+      await agent.prompt(buildInitialPrompt(initialError, operation, branch));
+      await agent.waitForIdle();
+    } catch (e) {
+      run.providerFailure ??= (e as Error).message;
+    } finally {
+      window.clearTimeout(wallClockTimer);
     }
 
-    if (trace.length >= MAX_STEPS && outcome === "gave_up") {
-      outcome = "step_budget_exceeded";
-      reason = "ran out of steps without finishing";
-    }
+    const { outcome, reason } = this.resolveOutcome(run, agent.state.errorMessage);
 
     const finishedAt = Date.now();
     const fullTrace: ReactTrace = {
@@ -245,7 +288,7 @@ export class GitReActAgent {
       initialError,
       operation,
       branch,
-      steps: trace,
+      steps: run.steps,
       outcome,
       reason,
     };
@@ -255,85 +298,240 @@ export class GitReActAgent {
       repo: this.repoId,
       outcome,
       reason,
-      steps: trace.length,
+      steps: run.steps.length,
       durationMs: finishedAt - startedAt,
     });
     return fullTrace;
   }
 
-  private logStep(stepNo: number, step: ReactStep, observation: string): void {
-    this.eventLog?.log({
-      kind: "agent_step",
-      repo: this.repoId,
-      step: stepNo,
-      thought: step.thought.slice(0, 300),
-      action: step.action,
-      params: step.params,
-      confidence: step.confidence,
-      observation: observation.slice(0, 500),
+  /**
+   * Fold the run's end states into the ReactTrace outcome. Precedence:
+   * explicit finish > guardrail/wall-clock abort > step budget > provider or
+   * model failure.
+   */
+  private resolveOutcome(
+    run: RunState,
+    agentError: string | undefined,
+  ): { outcome: ReactTrace["outcome"]; reason: string } {
+    if (run.finished) {
+      return {
+        outcome: run.finished.outcome === "ready_to_retry" ? "ready_to_retry" : "gave_up",
+        reason: run.finished.reason,
+      };
+    }
+    if (run.abort) return { outcome: run.abort.outcome, reason: run.abort.reason };
+    if (run.steps.length >= MAX_STEPS) {
+      return { outcome: "step_budget_exceeded", reason: "ran out of steps without finishing" };
+    }
+    const failure = run.providerFailure ?? agentError;
+    if (failure) return { outcome: "gave_up", reason: sanitizeSecrets(failure) };
+    if (run.lastAssistantText) {
+      return {
+        outcome: "gave_up",
+        reason: `model stopped without calling finish: ${sanitizeSecrets(run.lastAssistantText).slice(0, 300)}`,
+      };
+    }
+    return { outcome: "gave_up", reason: "no steps taken" };
+  }
+
+  /**
+   * Provider fan-out as a pi StreamFn: one non-streaming completion per turn,
+   * first available backend wins, each attempt individually timed out.
+   * Contract: never throws — failures become an `error` protocol event.
+   */
+  private makeStreamFn(run: RunState): StreamFn {
+    return (_model, context, options) => {
+      const stream = createAssistantMessageEventStream();
+      void (async () => {
+        const req = contextToChatRequest(context);
+        const errors: string[] = [];
+        for (const backend of this.backends) {
+          if (options?.signal?.aborted) break;
+          const remaining = run.deadline - Date.now();
+          if (remaining <= 0) {
+            errors.push("wall-clock budget exhausted before trying remaining providers");
+            break;
+          }
+          const start = Date.now();
+          try {
+            const message = await withTimeout(
+              backend.chat(req),
+              Math.min(this.providerTimeoutMs, remaining),
+              backend.name,
+            );
+            this.eventLog?.log({
+              kind: "llm_call",
+              repo: this.repoId,
+              provider: backend.id,
+              providerName: backend.name,
+              systemChars: req.system.length,
+              userChars: JSON.stringify(req.messages).length,
+              responseChars: JSON.stringify(message.content).length,
+              ms: Date.now() - start,
+              ok: true,
+            });
+            stream.push({ type: "start", partial: message });
+            stream.push({
+              type: "done",
+              reason: message.stopReason === "toolUse" || message.stopReason === "length"
+                ? message.stopReason
+                : "stop",
+              message,
+            });
+            return;
+          } catch (e) {
+            this.eventLog?.log({
+              kind: "llm_call",
+              repo: this.repoId,
+              provider: backend.id,
+              providerName: backend.name,
+              systemChars: req.system.length,
+              userChars: JSON.stringify(req.messages).length,
+              ms: Date.now() - start,
+              ok: false,
+              error: (e as Error).message?.slice(0, 300),
+            });
+            errors.push(`${backend.name}: ${(e as Error).message}`);
+          }
+        }
+        const reason = options?.signal?.aborted ? "aborted" : "error";
+        const errorMessage = options?.signal?.aborted
+          ? "recovery loop aborted"
+          : `all providers failed: ${errors.join("; ") || "no providers available"}`;
+        run.providerFailure ??= errorMessage;
+        stream.push({
+          type: "error",
+          reason,
+          error: {
+            role: "assistant",
+            content: [],
+            api: RECOVERY_MODEL.api,
+            provider: RECOVERY_MODEL.provider,
+            model: RECOVERY_MODEL.id,
+            usage: emptyUsage(),
+            stopReason: reason,
+            errorMessage,
+            timestamp: Date.now(),
+          },
+        });
+      })();
+      return stream;
+    };
+  }
+
+  /** Mirror pi's transcript into the ReactTrace step list + EventLog. */
+  private subscribeTraceRecorder(agent: Agent, run: RunState): void {
+    agent.subscribe((event) => {
+      if (event.type === "message_end") {
+        const m = event.message;
+        if ("role" in m && m.role === "assistant") {
+          const text = (m).content
+            .filter((c) => c.type === "text")
+            .map((c) => (c as { text: string }).text)
+            .join(" ")
+            .trim();
+          if (text) run.lastAssistantText = sanitizeSecrets(text);
+        }
+        return;
+      }
+      if (event.type === "tool_execution_start") {
+        const args = (event.args ?? {}) as Record<string, unknown>;
+        const params: Record<string, string> = {};
+        for (const [k, v] of Object.entries(args)) {
+          params[k] = typeof v === "string" ? v : JSON.stringify(v);
+        }
+        const step: ReactStep = {
+          thought: run.lastAssistantText,
+          action: event.toolName,
+          params,
+          confidence: clampConfidence(args.confidence),
+          observation: undefined,
+        };
+        run.steps.push(step);
+        run.byToolCallId.set(event.toolCallId, step);
+        return;
+      }
+      if (event.type === "tool_execution_end") {
+        const step = run.byToolCallId.get(event.toolCallId);
+        if (!step) return;
+        const result = event.result as { content?: Array<{ type: string; text?: string }> } | undefined;
+        const text = (result?.content ?? [])
+          .filter((c) => c.type === "text" && typeof c.text === "string")
+          .map((c) => c.text)
+          .join("\n")
+          .trim();
+        // Guardrail blocks keep their `blocked:` prefix (accumulatedEvidence
+        // and the abort reason rely on it); other errors get `error:` so the
+        // trace reads the same as the pre-pi loop.
+        step.observation = event.isError && !text.startsWith("blocked:")
+          ? `error: ${text || "tool failed"}`
+          : text || "ok";
+        this.eventLog?.log({
+          kind: "agent_step",
+          repo: this.repoId,
+          step: run.steps.indexOf(step) + 1,
+          thought: step.thought.slice(0, 300),
+          action: step.action,
+          params: step.params,
+          confidence: step.confidence,
+          observation: step.observation.slice(0, 500),
+        });
+      }
     });
   }
 
-  private async callModel(
-    initialError: string,
-    operation: string,
-    branch: string,
-    steps: ReactStep[],
-    deadline: number,
-  ): Promise<ReactStep> {
-    const user = buildReactStepPrompt(initialError, operation, branch, steps);
-    const errors: string[] = [];
-    for (const p of this.providers) {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
-        errors.push("wall-clock budget exhausted before trying remaining providers");
-        break;
-      }
-      const start = Date.now();
-      try {
-        const raw = await withTimeout(
-          p.complete(REACT_SYSTEM_PROMPT, user),
-          Math.min(this.providerTimeoutMs, remaining),
-          p.name,
-        );
-        this.eventLog?.log({
-          kind: "llm_call",
-          repo: this.repoId,
-          provider: p.id,
-          providerName: p.name,
-          systemChars: REACT_SYSTEM_PROMPT.length,
-          userChars: user.length,
-          responseChars: raw?.length ?? 0,
-          ms: Date.now() - start,
-          ok: !!raw,
-        });
-        if (raw) return parseReactStep(raw);
-      } catch (e) {
-        this.eventLog?.log({
-          kind: "llm_call",
-          repo: this.repoId,
-          provider: p.id,
-          providerName: p.name,
-          systemChars: REACT_SYSTEM_PROMPT.length,
-          userChars: user.length,
-          ms: Date.now() - start,
-          ok: false,
-          error: (e as Error).message?.slice(0, 300),
-        });
-        errors.push(`${p.name}: ${(e as Error).message}`);
-      }
+  /**
+   * Guardrail hook. Returning `{block: true}` makes pi emit an error tool
+   * result (our `blocked: …` reason) that feeds back to the model — a blocked
+   * step still consumes budget, exactly like the pre-pi loop.
+   */
+  private beforeToolCall(run: RunState, c: BeforeToolCallContext): BeforeToolCallResult | undefined {
+    const step = run.byToolCallId.get(c.toolCall.id);
+    const prev = run.steps.filter((s) => s !== step && s.observation !== undefined);
+    const current: ReactStep = step ?? {
+      thought: "",
+      action: c.toolCall.name,
+      params: {},
+      confidence: 0,
+    };
+
+    const block = this.guardrail(current, prev, run.initialError);
+    if (!block) {
+      run.blockedStreak = 0;
+      return undefined;
     }
-    throw new Error(errors.join("; ") || "no providers available");
+
+    run.blockedStreak++;
+    if (run.blockedStreak >= MAX_CONSECUTIVE_BLOCKS) {
+      run.abort ??= { outcome: "guardrail_aborted", reason: block };
+      return { block: true, reason: `blocked: ${block}`, terminate: true };
+    }
+    return { block: true, reason: `blocked: ${block}` };
+  }
+
+  /**
+   * Tool output can quote credential-bearing text (git error URLs,
+   * `git config --list` via git_exec) — sanitize and cap it before the model
+   * or the trace file sees it. Runs for executed tools and thrown errors;
+   * guardrail blocks bypass it, but their text is our own reason string.
+   */
+  private afterToolCall(c: AfterToolCallContext): AfterToolCallResult | undefined {
+    const content = c.result.content.map((block) =>
+      block.type === "text" ? { ...block, text: truncate(sanitizeSecrets(block.text)) } : block,
+    );
+    return { content };
   }
 
   /**
    * Returns null if the step is allowed, or a short reason string if blocked.
+   * Identical rules to the pre-pi loop; `prev` contains executed AND blocked
+   * steps (blocked ones are filtered where the rule demands it).
    */
   guardrail(step: ReactStep, prev: ReactStep[], initialError: string): string | null {
     // finish is always allowed
     if (step.action === "finish") return null;
 
-    // Unknown tool
+    // Unknown tool (pi also rejects these, but keep the tiered reason)
     if (!isObservationTool(step.action) && !isRecoveryTool(step.action)) {
       return `unknown tool '${step.action}'`;
     }
@@ -416,7 +614,8 @@ export class GitReActAgent {
 
     // Too many consecutive observations
     if (isObservationTool(step.action)) {
-      const tail = executed.slice(-MAX_OBSERVATIONS_IN_A_ROW);
+      const tail = prev.filter((s) => !s.observation?.startsWith("blocked:"))
+        .slice(-MAX_OBSERVATIONS_IN_A_ROW);
       if (
         tail.length >= MAX_OBSERVATIONS_IN_A_ROW &&
         tail.every((s) => isObservationTool(s.action))
@@ -426,22 +625,6 @@ export class GitReActAgent {
     }
 
     return null;
-  }
-
-  private async executeTool(step: ReactStep, branch: string, remoteUrl?: string): Promise<string> {
-    try {
-      if (isObservationTool(step.action)) {
-        const ctx: ObservationContext = { git: this.git, vaultPath: this.vaultPath, branch };
-        return await OBSERVATION_TOOLS[step.action](ctx);
-      }
-      const ctx: RecoveryContext = { git: this.git, vaultPath: this.vaultPath, branch, remoteUrl };
-      // Tools report what they actually did (git_exec returns stdout) — the
-      // model needs that to tell "fixed it" from "ran but changed nothing".
-      const result = await RECOVERY_TOOLS[step.action](ctx, step.params);
-      return typeof result === "string" && result.trim() ? truncate(result.trim()) : "ok";
-    } catch (e) {
-      return `error: ${(e as Error).message}`;
-    }
   }
 
   private async persistTrace(trace: ReactTrace): Promise<void> {
@@ -469,4 +652,21 @@ export class GitReActAgent {
       }
     } catch { /* ok */ }
   }
+}
+
+function clampConfidence(v: unknown): number {
+  return Math.min(5, Math.max(0, Number(v) || 0));
+}
+
+/** pi Context → the neutral request shape ToolCallBackends consume. */
+function contextToChatRequest(context: Context): BackendChatRequest {
+  return {
+    system: context.systemPrompt ?? REACT_SYSTEM_PROMPT,
+    messages: context.messages,
+    tools: (context.tools ?? []).map((t) => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters,
+    })),
+  };
 }

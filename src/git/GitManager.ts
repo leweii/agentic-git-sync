@@ -3,7 +3,7 @@ import { makeGit } from "./gitFactory";
 import { matchPattern } from "../glob";
 import { fs, path, type Dirent } from "../node-builtins";
 import type { PendingChanges, SyncProgress } from "../types";
-import type { AIProvider } from "../ai/AIProvider";
+import type { ToolCallBackend } from "../ai/piBackends";
 import { GitErrorAgent } from "./GitErrorAgent";
 import { resolveGitDir as resolveGitDirAt } from "./recoveryTools";
 import type { EventLog } from "../observability/EventLog";
@@ -104,7 +104,7 @@ export class GitManager {
     email: string,
     tokenProvider: TokenProvider,
     configDir: string,
-    providers: AIProvider[] = [],
+    backends: ToolCallBackend[] = [],
     eventLog: EventLog | null = null,
     /** Repo id used in event-log entries — VAULT_REPO_ID for main, submodule id otherwise. */
     repoId = "main",
@@ -117,7 +117,7 @@ export class GitManager {
     this.eventLog = eventLog;
     const rawGit = makeGit(vaultPath);
     this.git = eventLog ? wrapGitWithLogging(rawGit, eventLog, repoId) : rawGit;
-    this.errorAgent = new GitErrorAgent(this.git, vaultPath, providers, eventLog, repoId, configDir);
+    this.errorAgent = new GitErrorAgent(this.git, vaultPath, backends, eventLog, repoId, configDir);
     this.ready = this.configureBasics().catch(() => { /* best-effort */ });
   }
 

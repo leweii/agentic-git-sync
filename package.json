@@ -1,6 +1,6 @@
 {
   "name": "agentic-git-sync",
-  "version": "1.3.31",
+  "version": "1.4.0",
   "description": "An LLM agent runs every git operation for your Obsidian vault — commits, pulls, pushes, conflict resolution, recovery from broken repo states.",
   "main": "main.js",
   "scripts": {
@@ -22,11 +22,13 @@
     "eslint-plugin-obsidianmd": "^0.3.0",
     "obsidian": "latest",
     "tslib": "2.4.0",
-    "typescript": "4.7.4",
+    "typescript": "^5.9.3",
     "typescript-eslint": "^8.59.4",
     "vitest": "^4.1.6"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "^0.84.1",
+    "@earendil-works/pi-ai": "^0.84.1",
     "simple-git": "^3.22.0"
   }
 }
